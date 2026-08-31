@@ -1841,8 +1841,14 @@ function Field({ label, value, onChange, placeholder, type = 'text', list }: { l
 // ============================================================
 // APP
 // ============================================================
+const getRouteView = (): View => {
+  if (typeof window === 'undefined') return 'home';
+  const path = window.location.pathname.replace(/\/+$/, '') || '/';
+  return path === '/admin' ? 'admin' : 'home';
+};
+
 export default function App() {
-  const [view, setView] = useState<View>('home');
+  const [view, setView] = useState<View>(() => getRouteView());
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [cars, setCars] = useState<Car[]>([]);
@@ -1888,10 +1894,34 @@ export default function App() {
 
   useEffect(() => { void loadData(); }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const syncViewFromPath = (): void => {
+      const path = window.location.pathname.replace(/\/+$/, '') || '/';
+      if (path === '/admin') {
+        localStorage.setItem('servix_session', 'admin');
+        setView('admin');
+        return;
+      }
+      if (path === '/') {
+        setView('home');
+      }
+    };
+
+    syncViewFromPath();
+    window.addEventListener('popstate', syncViewFromPath);
+    return () => window.removeEventListener('popstate', syncViewFromPath);
+  }, []);
+
   // Restore session after refresh: admin stays in admin, employee stays logged in
   useEffect(() => {
     if (loading || sessionChecked) return;
     setSessionChecked(true);
+    if (typeof window !== 'undefined') {
+      const path = window.location.pathname.replace(/\/+$/, '') || '/';
+      if (path === '/admin') { setView('admin'); return; }
+      if (path === '/') { setView('home'); return; }
+    }
     if (initialSession === 'admin' && view === 'home') { setView('admin'); return; }
     if (initialSession?.startsWith('employee:') && view === 'home') {
       const id = initialSession.slice('employee:'.length);
@@ -1945,9 +1975,21 @@ export default function App() {
   }
 
   return view === 'home'
-    ? <Landing employees={employees} onEmployee={chooseEmployee} onAdmin={() => { localStorage.setItem('servix_session', 'admin'); setView('admin'); }} />
+    ? <Landing employees={employees} onEmployee={chooseEmployee} onAdmin={() => {
+        localStorage.setItem('servix_session', 'admin');
+        if (typeof window !== 'undefined') {
+          window.history.pushState({}, '', '/admin');
+        }
+        setView('admin');
+      }} />
     : view === 'employee' && employee
-      ? <PanouAngajat employee={employee} cars={cars} schedule={schedule} onRefresh={loadData} onChange={() => { localStorage.removeItem('servix_session'); setEmployee(null); setView('home'); }} />
-      : <AdminPanel employees={employees} cars={cars} appointments={appointments} schedule={schedule} rates={rates} themes={themes} onRefresh={loadData} adminTheme={adminTheme} employeeTheme={employeeTheme} onChangeAdminTheme={changeAdminTheme} onChangeEmployeeTheme={changeEmployeeTheme} onExit={() => { localStorage.removeItem('servix_session'); setView('home'); }} />;
+      ? <PanouAngajat employee={employee} cars={cars} schedule={schedule} onRefresh={loadData} onChange={() => { localStorage.removeItem('servix_session'); setEmployee(null); setView('home'); if (typeof window !== 'undefined') { window.history.pushState({}, '', '/'); } }} />
+      : <AdminPanel employees={employees} cars={cars} appointments={appointments} schedule={schedule} rates={rates} themes={themes} onRefresh={loadData} adminTheme={adminTheme} employeeTheme={employeeTheme} onChangeAdminTheme={changeAdminTheme} onChangeEmployeeTheme={changeEmployeeTheme} onExit={() => {
+        localStorage.removeItem('servix_session');
+        setView('home');
+        if (typeof window !== 'undefined') {
+          window.history.pushState({}, '', '/');
+        }
+      }} />;
 }
 
