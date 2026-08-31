@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2C3442"/><stop offset="1" stop-color="#232A36"/></linearGradient>
+    <linearGradient id="p" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#75808A"/><stop offset="1" stop-color="rgba(0,0,0,0.28)"/></linearGradient>
+  </defs>
+  <rect width="320" height="240" rx="14" fill="url(#bg)"/>
+  <ellipse cx="160" cy="196" rx="120" ry="10" fill="rgba(0,0,0,0.35)"/>
+  <path d="M48 170 L44 118 Q44 102 60 98 L92 92 L112 62 Q118 52 132 52 L204 52 Q220 52 228 62 L252 90 L276 96 Q292 100 292 116 L288 170 Z" fill="url(#p)" stroke="rgba(255,255,255,0.18)" stroke-width="1.5"/>
+  <path d="M118 66 L148 66 L148 90 L100 90 Z" fill="#171A24"/><path d="M156 66 L200 66 Q208 66 213 73 L230 90 L156 90 Z" fill="#171A24"/>
+  <path d="M70 126 L262 126" stroke="rgba(255,255,255,0.14)" stroke-width="2" fill="none"/>
+  <circle cx="96" cy="174" r="22" fill="#171A24" stroke="#C9CDD6" stroke-width="5"/>
+  <circle cx="244" cy="174" r="22" fill="#171A24" stroke="#C9CDD6" stroke-width="5"/>
+  <circle cx="96" cy="174" r="12" fill="#59606D"/><circle cx="244" cy="174" r="12" fill="#59606D"/>
+  <text x="160" y="224" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700" fill="#A8B0BF" letter-spacing="2">AUDI Q5</text>
+</svg>

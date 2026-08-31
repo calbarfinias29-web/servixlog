@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2C3442"/><stop offset="1" stop-color="#232A36"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8B93A3"/><stop offset="1" stop-color="#687083"/>
+    </linearGradient>
+  </defs>
+  <rect width="320" height="240" rx="14" fill="url(#bg)"/>
+  <ellipse cx="160" cy="196" rx="118" ry="10" fill="rgba(0,0,0,0.35)"/>
+  <path d="M62 172 L58 138 Q58 126 70 122 L96 116 L118 88 Q124 80 136 80 L200 80 Q212 80 220 88 L244 114 L266 120 Q278 124 278 136 L274 172 Z" fill="url(#body)"/>
+  <path d="M124 92 L156 92 L156 114 L108 114 Z" fill="#171A24"/>
+  <path d="M164 92 L196 92 Q202 92 206 97 L222 114 L164 114 Z" fill="#171A24"/>
+  <rect x="86" y="128" width="150" height="7" rx="3.5" fill="#232A36"/>
+  <circle cx="98" cy="176" r="17" fill="#171A24" stroke="#687083" stroke-width="4"/>
+  <circle cx="238" cy="176" r="17" fill="#171A24" stroke="#687083" stroke-width="4"/>
+  <text x="160" y="222" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="700" fill="#A8B0BF" letter-spacing="2">SERVICEX</text>
+</svg>

@@ -1,0 +1,146 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Inter', sans-serif;
+  color: #171a24;
+  background: #f6f7fb;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+
+  /* Default theme variables — SERVICEX PREMIUM (light) */
+  --primary: #6D35F2;
+  --primary-hover: #7C4DFF;
+  --secondary: #7C4DFF;
+  --accent: #7C4DFF;
+  --background: #F6F7FB;
+  --surface: #FFFFFF;
+  --surface-secondary: #FFFFFF;
+  --sidebar: #FFFFFF;
+  --card: #FFFFFF;
+  --button: #6D35F2;
+  --text-primary: #171A24;
+  --text-secondary: #687083;
+  --text-muted: #8B93A3;
+  --border: #E5E7EF;
+  --success: #22A05A;
+  --warning: #F97316;
+  --danger: #EF233C;
+  --info: #3B82F6;
+}
+
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+h1, h2, h3, h4 { font-family: 'Inter', sans-serif; line-height: 1.2; }
+* { box-sizing: border-box; }
+
+.employee-home {
+  grid-template-rows: auto auto auto auto auto;
+  gap: 8px;
+  align-items: start;
+}
+.employee-work-grid,
+.employee-notes { gap: 8px; }
+.employee-timers > div:first-child { grid-column: 1 / -1; }
+
+@media (min-width: 1024px) {
+  .employee-shell { height: 100vh; overflow: hidden; }
+  .employee-frame { height: 100vh; }
+  .employee-sidebar { height: 100vh; }
+  .employee-content { min-width: 0; overflow: auto; }
+}
+
+@media (max-width: 1279px) and (min-width: 768px) {
+  .employee-home {
+    gap: 8px;
+  }
+  .employee-work-grid,
+  .employee-notes {
+    gap: 8px;
+  }
+  .employee-timers {
+    min-height: 112px;
+  }
+  .employee-timers > div:not(:first-child) { min-height: 76px; }
+  .employee-timers > div {
+    min-width: 0;
+  }
+  .employee-timers span {
+    white-space: nowrap;
+  }
+  .employee-car,
+  .employee-repair,
+  .employee-schedule,
+  .employee-info,
+  .employee-recommendation {
+    min-width: 0;
+  }
+  .employee-content { padding: 16px; }
+  .employee-home > .employee-car { min-height: 96px; }
+  .employee-home > .employee-car > div:not(.mb-2) { min-height: 56px; }
+  .employee-controls { grid-auto-rows: 44px; }
+  .employee-work-grid { min-height: 0; }
+  .employee-work-grid > .employee-repair,
+  .employee-work-grid > .employee-schedule { min-height: 132px; padding: 10px; }
+  .employee-work-grid > .employee-repair { min-height: 132px; padding: 10px; }
+  .employee-notes > .employee-info,
+  .employee-notes > .employee-recommendation { min-height: 112px; }
+}
+
+@media (min-width: 768px) {
+  .employee-shell { height: 100vh; overflow: hidden; }
+  .employee-frame { height: 100vh; }
+  .employee-sidebar { width: 164px !important; height: 100vh; }
+  .employee-content { min-width: 0; overflow: auto; padding: 20px !important; }
+  .employee-home {
+    grid-template-columns: minmax(0, 1.87fr) minmax(0, 1fr);
+    grid-template-areas:
+      "car work"
+      "timers work"
+      "controls work"
+      "notes notes";
+    gap: 16px;
+  }
+  .employee-car { grid-area: car; min-height: 164px; }
+  .employee-timers {
+    grid-area: timers;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    background: transparent !important;
+    border: 0 !important;
+    padding: 0 !important;
+  }
+  .employee-timers > div:first-child { display: none; }
+  .employee-timers > div:not(:first-child) {
+    min-width: 0;
+    min-height: 164px;
+    padding: 12px 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .employee-controls { grid-area: controls; gap: 12px; grid-auto-rows: 44px; }
+  .employee-work-grid {
+    grid-area: work;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+  }
+  .employee-work-grid > .employee-repair,
+  .employee-work-grid > .employee-schedule {
+    min-height: 0;
+    padding: 16px;
+  }
+  .employee-work-grid > .employee-repair { min-height: 248px; }
+  .employee-work-grid > .employee-schedule { min-height: 190px; }
+  .employee-overtime-stop { margin-top: -4px; }
+  .employee-notes { grid-area: notes; gap: 16px; }
+}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--background); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
