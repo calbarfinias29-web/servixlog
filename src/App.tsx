@@ -1064,6 +1064,149 @@ function buildCarReportLines(car: Car, rates: Rates | null, plateHistory: PlateH
   lines.push(pdfHeading('Generat'), pdfRow('Data generarii', `${new Date().toLocaleString('ro-RO')} - SERVIX Service Auto`));
   return lines;
 }
+/** Structura unei aparitii a unei lucrari un anumit an, cu cost calculat separat. */
+interface JobOccurrence {
+  year: number;
+  car: Car;
+  job: Job;
+  emp: string;
+  normalSec: number;
+  overtimeSec: number;
+  normalRate: number;
+  overtimeRate: number;
+  normalCost: number;
+  overtimeCost: number;
+  totalSec: number;
+  totalCost: number;
+}
+
+/** Anul unei lucrari (pe baza completarii sau inceperii). */
+function jobOccurrenceYear(job: Job): number {
+  const ts = job.completed_at ?? job.started_at ?? null;
+  return ts ? new Date(ts).getFullYear() : new Date().getFullYear();
+}
+
+/**
+ * Calcuierea costului manoperei pentru O SINGURA lucrare, folosind exact
+ * mecanismul existent din buildCarReportLines (tarife normale/garanție/supl.).
+ */
+function computeJobCost(job: Job, car: Car, rates: Rates | null): { normalSec: number; overtimeSec: number; normalRate: number; overtimeRate: number; normalCost: number; overtimeCost: number; totalSec: number; totalCost: number } {
+  const normalSec = job.worked_seconds - (job.overtime_seconds ?? 0);
+  const overtimeSec = job.overtime_seconds ?? 0;
+  const normalRate = car.is_warranty ? (rates?.warranty_rate ?? 0) : (rates?.normal_rate ?? 100);
+  const overtimeRate = rates?.overtime_rate ?? 150;
+  const normalCost = (normalSec / 3600) * normalRate;
+  const overtimeCost = (overtimeSec / 3600) * overtimeRate;
+  return { normalSec, overtimeSec, normalRate, overtimeRate, normalCost, overtimeCost, totalSec: job.worked_seconds, totalCost: normalCost + overtimeCost };
+}
+
+/** Colecteaza toate aparitiile lucrarilor din toate masinile, sortate pe an. */
+function collectJobOccurrences(cars: Car[], rates: Rates | null, employeeName: (id: string | null) => string): JobOccurrence[] {
+  const out: JobOccurrence[] = [];
+  for (const car of cars) {
+    for (const job of car.jobs ?? []) {
+      const cost = computeJobCost(job, car, rates);
+      out.push({ year: jobOccurrenceYear(job), car, job, emp: employeeName(car.assigned_employee_id), ...cost });
+    }
+  }
+  out.sort((a: JobOccurrence, b: JobOccurrence) => (a.year !== b.year ? a.year - b.year : a.job.order_index - b.job.order_index));
+  return out;
+}
+
+function occurrencesPeriod(occs: JobOccurrence[]): string {
+  if (occs.length === 0) return '-';
+  const ys = occs.map((o: JobOccurrence) => o.year);
+  return `${Math.min(...ys)} - ${Math.max(...ys)}`;
+}
+
+function formatHrCost(o: JobOccurrence): PdfLine[] {
+  return [
+    pdfRow('  Masina', `${o.car.make ?? ''} ${o.car.model ?? ''}`.trim() || '-'),
+    pdfRow('  Nr. inmatriculare', o.car.license_plate),
+    pdfRow('  Client', o.car.client_name),
+    pdfRow('  Angajat', o.emp),
+    pdfRow('  Data', (o.job.completed_at ?? o.job.started_at) ? new Date(o.job.completed_at ?? o.job.started_at).toLocaleDateString('ro-RO') : '-'),
+    pdfRow('  Ore lucrate', `${formatShortDuration(o.totalSec)}  (normal ${formatShortDuration(o.normalSec)} / peste program ${formatShortDuration(o.overtimeSec)})`),
+    pdfRow('  Cost manopera', `${o.totalCost.toFixed(2)} lei  (normal ${o.normalCost.toFixed(2)} lei x ${o.normalRate} lei/ora + supl. ${o.overtimeCost.toFixed(2)} lei x ${o.overtimeRate} lei/ora)`),
+  ];
+}
+/** PDF „Raport per lucrare”: doar datele pentru lucrarea selectata, separat pe an. */
+function buildJobReportLines(cars: Car[], rates: Rates | null, employeeName: (id: string | null) => string, jobTitle: string): PdfLine[] {
+  const occs = collectJobOccurrences(cars, rates, employeeName).filter((o: JobOccurrence) => o.job.title === jobTitle);
+  const lines: PdfLine[] = [
+    pdfTitle('SERVIX - Raport per lucrare'),
+    pdfRow('Tip raport', 'Per lucrare'),
+    pdfRow('Lucrare', jobTitle),
+    pdfRow('Perioada', occurrencesPeriod(occs)),
+    pdfHeading(jobTitle.toUpperCase()),
+  ];
+  if (occs.length === 0) {
+    lines.push(pdfRow('-', 'Nu exista inregistrari pentru aceasta lucrare'));
+  } else {
+    let lastYear: number | null = null;
+    let totalSec = 0;
+    let totalCost = 0;
+    for (const o of occs) {
+      if (o.year !== lastYear) {
+        lines.push({ text: String(o.year), size: 13, bold: true, gapBefore: 10 });
+        lastYear = o.year;
+      }
+      lines.push(...formatHrCost(o));
+      totalSec += o.totalSec;
+      totalCost += o.totalCost;
+    }
+    lines.push({ text: `Total lucrare: ${occs.length} aparitii, ${formatShortDuration(totalSec)} ore, ${totalCost.toFixed(2)} lei`, size: 13, bold: true, gapBefore: 12 });
+  }
+  lines.push(pdfHeading('Generat'), pdfRow('Data generarii', `${new Date().toLocaleString('ro-RO')} - SERVIX Service Auto`));
+  return lines;
+}
+
+/** PDF „Raport total”: fiecare lucrare separat, pe an, plus total general suplementar. */
+function buildTotalReportLines(cars: Car[], rates: Rates | null, employeeName: (id: string | null) => string): PdfLine[] {
+  const occs = collectJobOccurrences(cars, rates, employeeName);
+  const lines: PdfLine[] = [
+    pdfTitle('SERVIX - Raport total'),
+    pdfRow('Tip raport', 'Total'),
+    pdfRow('Perioada', occurrencesPeriod(occs)),
+  ];
+  const grouped = new Map<string, JobOccurrence[]>();
+  for (const o of occs) {
+    if (!grouped.has(o.job.title)) grouped.set(o.job.title, []);
+    grouped.get(o.job.title)!.push(o);
+  }
+  const sortedTitles = Array.from(grouped.keys()).sort();
+  if (sortedTitles.length === 0) {
+    lines.push(pdfRow('-', 'Nu exista lucrari inregistrate'));
+  }
+  let grandTotalSec = 0;
+  let grandTotalCost = 0;
+  for (const title of sortedTitles) {
+    const list = grouped.get(title)!;
+    lines.push(pdfHeading(title));
+    let lastYear: number | null = null;
+    for (const o of list) {
+      if (o.year !== lastYear) {
+        lines.push({ text: String(o.year), size: 12, bold: true, gapBefore: 6 });
+        lastYear = o.year;
+      }
+      lines.push(...formatHrCost(o));
+      grandTotalSec += o.totalSec;
+      grandTotalCost += o.totalCost;
+    }
+  }
+  if (occs.length > 0) {
+    lines.push(pdfHeading('Total general (suplementar)'));
+    lines.push(pdfRow('Ore totale', formatShortDuration(grandTotalSec)));
+    lines.push({ text: `Cost total: ${grandTotalCost.toFixed(2)} lei`, size: 13, bold: true });
+  }
+  lines.push(pdfHeading('Generat'), pdfRow('Data generarii', `${new Date().toLocaleString('ro-RO')} - SERVIX Service Auto`));
+  return lines;
+}
+
+function slugify(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'raport';
+}
+
 
 function ReportsView({ cars, employees, rates, employeeName }: { cars: Car[]; employees: Employee[]; rates: Rates | null; employeeName: (id: string | null) => string }) {
   const finalizedCars = cars.filter((c: Car) => getCarStatus(c.jobs ?? []) === 'finalizata');
@@ -1079,6 +1222,20 @@ function ReportsView({ cars, employees, rates, employeeName }: { cars: Car[]; em
   const generatePDF = (car: Car): void => {
     generateReportPdf(`servix_raport_${car.license_plate}.pdf`, buildCarReportLines(car, rates, [], [], employeeName(car.assigned_employee_id)));
   };
+  const [showGenerate, setShowGenerate] = useState(false);
+  const [reportType, setReportType] = useState<'job' | 'total'>('job');
+  const [selectedJob, setSelectedJob] = useState('');
+  const jobTitles: string[] = Array.from(new Set((cars.flatMap((c: Car) => c.jobs ?? []).map((j: Job) => j.title).filter(Boolean)))).sort();
+  const generateSelectedPDF = (): void => {
+    if (reportType === 'total') {
+      generateReportPdf('servix_raport_total.pdf', buildTotalReportLines(cars, rates, employeeName));
+    } else {
+      if (!selectedJob) return;
+      generateReportPdf(`servix_raport_lucrare_${slugify(selectedJob)}.pdf`, buildJobReportLines(cars, rates, employeeName, selectedJob));
+    }
+    setShowGenerate(false);
+  };
+
   const kpiCards: Array<{ label: string; count: number; bg: string; dot: string; Icon: React.ElementType }> = [
     { label: 'Încasate', count: incasate.length, bg: 'color-mix(in srgb, var(--success) 10%, transparent)', dot: 'var(--success)', Icon: DollarSign },
     { label: 'Neîncasate', count: neincasate.length, bg: '#FEF2F2', dot: '#EF4444', Icon: AlertTriangle },
@@ -1086,10 +1243,13 @@ function ReportsView({ cars, employees, rates, employeeName }: { cars: Car[]; em
     { label: 'Nefacturate', count: nefacturate.length, bg: 'color-mix(in srgb, var(--primary) 10%, transparent)', dot: 'var(--primary)', Icon: Hash },
   ];
   return <div className="space-y-5">
+<div className="flex flex-wrap items-start justify-between gap-4">
 <div>
 <p className="text-[13px] font-bold uppercase tracking-[0.18em]" style={{ color: SV.purple }}>Control service</p>
 <h2 className="mt-2 text-[32px] font-bold leading-tight" style={{ color: SV.navy }}>Rapoarte</h2>
 <p className="mt-2 text-sm" style={{ color: SV.sec }}>Analizează activitatea service-ului și urmărește starea lucrărilor și încasărilor.</p>
+</div>
+<button onClick={() => { setSelectedJob(jobTitles[0] ?? ''); setShowGenerate(true); }} className="flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold text-white shadow-sm" style={{ background: 'var(--button)' }}><FileBarChart size={16} /> GENEREAZĂ PDF</button>
 </div>
 <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
 {kpiCards.map((k) => <div key={k.label} className="flex items-center justify-between rounded-[14px] border p-5" style={{ borderColor: SV.border, background: k.bg }}>
@@ -1121,6 +1281,26 @@ function ReportsView({ cars, employees, rates, employeeName }: { cars: Car[]; em
 </div>
 </div>
 <p className="pt-2 pb-4 text-center text-xs" style={{ color: SV.muted }}>Rapoartele sunt actualizate în timp real.</p>
+{showGenerate && <Modal title="Generează raport PDF" onClose={() => setShowGenerate(false)}>
+<div className="space-y-5 p-6">
+<div>
+<p className="mb-2 text-xs font-bold uppercase tracking-[0.14em]" style={{ color: 'var(--text-secondary)' }}>Tip raport</p>
+<div className="grid gap-3 sm:grid-cols-2">
+<button onClick={() => setReportType('job')} className="rounded-xl border p-4 text-left transition" style={reportType === 'job' ? { borderColor: 'var(--primary)', background: 'color-mix(in srgb, var(--primary) 8%, transparent)' } : { borderColor: 'var(--border)' }}><p className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Raport per lucrare</p><p className="mt-1 text-xs" style={{ color: 'var(--text-secondary)' }}>Selectezi o lucrare si vezi doar datele pentru ea, separat pe ani.</p></button>
+<button onClick={() => setReportType('total')} className="rounded-xl border p-4 text-left transition" style={reportType === 'total' ? { borderColor: 'var(--primary)', background: 'color-mix(in srgb, var(--primary) 8%, transparent)' } : { borderColor: 'var(--border)' }}><p className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Raport total</p><p className="mt-1 text-xs" style={{ color: 'var(--text-secondary)' }}>Toate lucrarile, fiecare separat pe ani, plus total general.</p></button>
+</div>
+</div>
+{reportType === 'job' && <div>
+<p className="mb-2 text-xs font-bold uppercase tracking-[0.14em]" style={{ color: 'var(--text-secondary)' }}>Lucrare</p>
+{jobTitles.length === 0 ? <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Nu exista lucrari inregistrate.</p> : <select value={selectedJob} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSelectedJob(e.target.value)} className="h-11 w-full rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: 'var(--border)', color: 'var(--text-primary)' }}>{jobTitles.map((t: string) => <option key={t} value={t}>{t}</option>)}</select>}
+</div>}
+<div className="flex justify-end gap-3 border-t pt-4" style={{ borderColor: 'var(--border)' }}>
+<button onClick={() => setShowGenerate(false)} className="rounded-lg border px-4 py-2.5 text-sm font-bold" style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>Anulează</button>
+<button onClick={generateSelectedPDF} disabled={reportType === 'job' && !selectedJob} className="flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold text-white disabled:opacity-40" style={{ background: 'var(--button)' }}><FileText size={16} /> Generează PDF</button>
+</div>
+</div>
+</Modal>}
+
 </div>;
 }
 
