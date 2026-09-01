@@ -118,7 +118,7 @@ function applyTheme(colors: ThemeColors): void {
   Object.entries(colors).forEach(([key, value]) => { root.style.setProperty(key, value); });
 }
 
-const SERVIX_LOGO_PATH = '/servix-logo.svg';
+const SERVIX_LOGO_PATH = '/servix-logo.png';
 
 // SERVICEX PREMIUM — aceeași interfață, două palete de token-uri.
 // Light = business / clean / premium; Dark = business / technical / premium.
