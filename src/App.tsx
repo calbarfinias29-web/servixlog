@@ -5,7 +5,7 @@ import {
   Settings, ShieldCheck, Trash2, UserRound, Users, Wrench, X, Zap,
   Palette, FileBarChart, Calendar, AlertTriangle, Save, FileText, Image,
   Hash, KeyRound, Lock, Download, Upload, Clock, CalendarClock, Eye, EyeOff, Info,
-  UserPlus, Mail, Phone, Coins, MoreVertical, ChevronDown, DollarSign, SlidersHorizontal,
+  UserPlus, Mail, Phone, Coins, MoreVertical, ChevronDown, DollarSign, SlidersHorizontal, Percent,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { Car, CarStatus, Employee, EmployeeEventSettings, EventMode, Job, JobStatus, Priority, Rates, Schedule, Theme, ThemeColors, View, FinancialStatus, FuelLevel, PlateHistoryEntry, MileageLogEntry, Appointment, AppointmentStatus, CarPhoto } from '@/types';
@@ -118,6 +118,8 @@ function applyTheme(colors: ThemeColors): void {
   Object.entries(colors).forEach(([key, value]) => { root.style.setProperty(key, value); });
 }
 
+const SERVIX_LOGO_PATH = '/servix-logo.svg';
+
 // SERVICEX PREMIUM — aceeași interfață, două palete de token-uri.
 // Light = business / clean / premium; Dark = business / technical / premium.
 const SERVIX_EMPLOYEE_DARK: ThemeColors = {
@@ -190,9 +192,9 @@ function Landing({ employees, onEmployee, onAdmin, children }: { employees: Empl
     <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-6xl flex-col justify-between">
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl text-white" style={{ background: 'var(--primary)' }}><Wrench size={20} strokeWidth={2.5} /></div>
+          <img src={SERVIX_LOGO_PATH} alt="SERVIX logo" className="h-12 w-12 rounded-xl object-cover ring-1 ring-[var(--border)]" />
           <div>
-            <div className="text-2xl font-extrabold tracking-tight" style={{ color: 'var(--text-primary)' }}>Servix</div>
+            <div className="text-2xl font-extrabold tracking-tight" style={{ color: 'var(--text-primary)' }}>SERVIX</div>
             <div className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: 'var(--text-secondary)' }}>Atelier management</div>
           </div>
         </div>
@@ -219,7 +221,7 @@ function Landing({ employees, onEmployee, onAdmin, children }: { employees: Empl
           {employees.filter((e: Employee) => e.role === 'employee').length === 0 && <div className="col-span-3 rounded-xl border border-dashed p-10 text-center" style={{ background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>Nu există angajați activi.</div>}
         </div>
         : <div className="mx-auto max-w-sm rounded-xl p-8 shadow-2xl" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-            <div className="mb-2 text-center text-[26px] font-extrabold tracking-tight"><span style={{ color: 'var(--text-primary)' }}>Serv</span><span style={{ color: 'var(--primary)' }}>ix</span></div>
+            <div className="mb-2 flex justify-center"><img src={SERVIX_LOGO_PATH} alt="SERVIX logo" className="h-20 w-20 rounded-2xl object-cover ring-1 ring-[var(--border)]" /></div>
             <p className="mb-6 text-center text-xs font-bold uppercase tracking-[0.22em]" style={{ color: 'var(--secondary)' }}>Acces angajat</p>
             <div className="mb-6 text-center">
               {selectedEmp.avatar_url
@@ -1155,7 +1157,14 @@ function buildJobReportLines(cars: Car[], rates: Rates | null, employeeName: (id
       totalSec += o.totalSec;
       totalCost += o.totalCost;
     }
-    lines.push({ text: `Total lucrare: ${occs.length} aparitii, ${formatShortDuration(totalSec)} ore, ${totalCost.toFixed(2)} lei`, size: 13, bold: true, gapBefore: 12 });
+    const vatRate = rates?.vat_rate ?? 21;
+    const totalWithoutVat = totalCost;
+    const vatAmount = (totalWithoutVat * vatRate) / 100;
+    const totalWithVat = totalWithoutVat + vatAmount;
+    lines.push({ text: `Total lucrare: ${occs.length} aparitii, ${formatShortDuration(totalSec)} ore, ${totalWithoutVat.toFixed(2)} lei`, size: 13, bold: true, gapBefore: 12 });
+    lines.push({ text: `Total fara TVA: ${totalWithoutVat.toFixed(2)} lei`, size: 11, bold: false, gapBefore: 8 });
+    lines.push({ text: `TVA (${vatRate}%): ${vatAmount.toFixed(2)} lei`, size: 11, bold: false });
+    lines.push({ text: `TOTAL CU TVA: ${totalWithVat.toFixed(2)} lei`, size: 14, bold: true, gapBefore: 6 });
   }
   lines.push(pdfHeading('Generat'), pdfRow('Data generarii', `${new Date().toLocaleString('ro-RO')} - SERVIX Service Auto`));
   return lines;
@@ -1197,7 +1206,13 @@ function buildTotalReportLines(cars: Car[], rates: Rates | null, employeeName: (
   if (occs.length > 0) {
     lines.push(pdfHeading('Total general (suplementar)'));
     lines.push(pdfRow('Ore totale', formatShortDuration(grandTotalSec)));
-    lines.push({ text: `Cost total: ${grandTotalCost.toFixed(2)} lei`, size: 13, bold: true });
+    const vatRate = rates?.vat_rate ?? 21;
+    const subtotalWithoutVat = grandTotalCost;
+    const vatAmount = (subtotalWithoutVat * vatRate) / 100;
+    const grandTotalWithVat = subtotalWithoutVat + vatAmount;
+    lines.push({ text: `Subtotal fara TVA: ${subtotalWithoutVat.toFixed(2)} lei`, size: 11, bold: false, gapBefore: 8 });
+    lines.push({ text: `TVA (${vatRate}%): ${vatAmount.toFixed(2)} lei`, size: 11, bold: false });
+    lines.push({ text: `TOTAL CU TVA: ${grandTotalWithVat.toFixed(2)} lei`, size: 14, bold: true, gapBefore: 6 });
   }
   lines.push(pdfHeading('Generat'), pdfRow('Data generarii', `${new Date().toLocaleString('ro-RO')} - SERVIX Service Auto`));
   return lines;
@@ -1225,13 +1240,24 @@ function ReportsView({ cars, employees, rates, employeeName }: { cars: Car[]; em
   const [showGenerate, setShowGenerate] = useState(false);
   const [reportType, setReportType] = useState<'job' | 'total'>('job');
   const [selectedJob, setSelectedJob] = useState('');
-  const jobTitles: string[] = Array.from(new Set((cars.flatMap((c: Car) => c.jobs ?? []).map((j: Job) => j.title).filter(Boolean)))).sort();
+  const [selectedReportCar, setSelectedReportCar] = useState<Car | null>(null);
+  // Scopes raportul DOAR pe mașina selectată din rând; când nu există, acoperă toate mașinile.
+  const reportCars: Car[] = selectedReportCar ? [selectedReportCar] : cars;
+  const jobTitles: string[] = Array.from(new Set((reportCars.flatMap((c: Car) => c.jobs ?? []).map((j: Job) => j.title).filter(Boolean)))).sort();
+  // Deschide modalul de generare raport. `car` null = raport general (toate mașinile).
+  const openReportModal = (car: Car | null): void => {
+    setSelectedReportCar(car);
+    const scope = car ? (car.jobs ?? []) : cars.flatMap((c: Car) => c.jobs ?? []);
+    const titles = Array.from(new Set(scope.map((j: Job) => j.title).filter(Boolean))).sort();
+    setSelectedJob(titles[0] ?? '');
+    setShowGenerate(true);
+  };
   const generateSelectedPDF = (): void => {
     if (reportType === 'total') {
-      generateReportPdf('servix_raport_total.pdf', buildTotalReportLines(cars, rates, employeeName));
+      generateReportPdf('servix_raport_total.pdf', buildTotalReportLines(reportCars, rates, employeeName));
     } else {
       if (!selectedJob) return;
-      generateReportPdf(`servix_raport_lucrare_${slugify(selectedJob)}.pdf`, buildJobReportLines(cars, rates, employeeName, selectedJob));
+      generateReportPdf(`servix_raport_lucrare_${slugify(selectedJob)}.pdf`, buildJobReportLines(reportCars, rates, employeeName, selectedJob));
     }
     setShowGenerate(false);
   };
@@ -1249,7 +1275,7 @@ function ReportsView({ cars, employees, rates, employeeName }: { cars: Car[]; em
 <h2 className="mt-2 text-[32px] font-bold leading-tight" style={{ color: SV.navy }}>Rapoarte</h2>
 <p className="mt-2 text-sm" style={{ color: SV.sec }}>Analizează activitatea service-ului și urmărește starea lucrărilor și încasărilor.</p>
 </div>
-<button onClick={() => { setSelectedJob(jobTitles[0] ?? ''); setShowGenerate(true); }} className="flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold text-white shadow-sm" style={{ background: 'var(--button)' }}><FileBarChart size={16} /> GENEREAZĂ PDF</button>
+<button onClick={() => openReportModal(null)} className="flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold text-white shadow-sm" style={{ background: 'var(--button)' }}><FileBarChart size={16} /> GENEREAZĂ PDF</button>
 </div>
 <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
 {kpiCards.map((k) => <div key={k.label} className="flex items-center justify-between rounded-[14px] border p-5" style={{ borderColor: SV.border, background: k.bg }}>
@@ -1257,7 +1283,7 @@ function ReportsView({ cars, employees, rates, employeeName }: { cars: Car[]; em
 <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--surface)_75%,transparent)]">{createElement(k.Icon, { size: 16, style: { color: k.dot } })}</span>
 </div>)}
 </div>
-<div className="overflow-hidden rounded-[16px] border bg-[var(--surface)] shadow-sm" style={{ borderColor: SV.border }}><div className="border-b px-6 py-4" style={{ borderColor: SV.border }}><h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>Mașini finalizate ({finalizedCars.length})</h3></div><div className="hidden grid-cols-[1fr_1fr_1fr_1fr_1.2fr_1fr_1.2fr_60px] gap-4 border-b bg-[var(--surface-secondary)] px-6 py-3 text-[11px] font-bold uppercase tracking-[0.12em] sm:grid" style={{ borderColor: SV.border, color: SV.muted }}><span>Client</span><span>Mașină</span><span>Nr. Înm.</span><span>Data fin.</span><span>Angajat</span><span>Timp total</span><span>Status financiar</span><span className="text-right">PDF</span></div>{finalizedCars.length === 0 ? <div className="p-8 text-center text-sm" style={{ color: SV.sec }}>Nu există mașini finalizate.</div> : finalizedCars.map((car: Car) => <div key={car.id} className="grid grid-cols-1 gap-2 border-b px-6 py-4 last:border-0 sm:grid-cols-[1fr_1fr_1fr_1fr_1.2fr_1fr_1.2fr_60px] sm:items-center sm:gap-4" style={{ borderColor: SV.border }}><span className="text-sm font-semibold" style={{ color: SV.navy }}>{car.client_name}</span><span className="text-sm" style={{ color: SV.sec }}>{car.make} {car.model}</span><span className="text-sm font-bold" style={{ color: SV.navy }}>{car.license_plate}</span><span className="text-sm" style={{ color: SV.sec }}>{car.completed_at ? new Date(car.completed_at).toLocaleDateString('ro-RO') : '—'}</span>{(() => { const n = employeeName(car.assigned_employee_id); return <span className="flex min-w-0 items-center gap-2"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold" style={{ background: SV.lav, color: SV.purple }}>{n[0]}</span><span className="truncate text-sm font-medium" style={{ color: SV.navy }}>{n}</span></span>; })()}<span className="font-mono text-sm" style={{ color: 'var(--text-secondary)' }}>{formatShortDuration(totalWorkedSeconds(car.jobs))}</span><select defaultValue={car.financial_status} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => void updateFinancial(car, e.target.value)} className={`h-9 rounded-lg border px-2 text-xs font-bold ${financialStyles[car.financial_status as FinancialStatus] ?? 'border-[var(--border)] text-[var(--text-secondary)]'}`}>{financialOptions.map((f: FinancialStatus) => <option key={f} value={f}>{financialLabels[f]}</option>)}</select><button onClick={() => generatePDF(car)} className="justify-self-end rounded-lg p-1.5 transition hover:bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]" style={{ color: SV.purple }} title="Generează PDF"><FileText size={16} /></button></div>)}</div>
+<div className="overflow-hidden rounded-[16px] border bg-[var(--surface)] shadow-sm" style={{ borderColor: SV.border }}><div className="border-b px-6 py-4" style={{ borderColor: SV.border }}><h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>Mașini finalizate ({finalizedCars.length})</h3></div><div className="hidden grid-cols-[1fr_1fr_1fr_1fr_1.2fr_1fr_1.2fr_60px] gap-4 border-b bg-[var(--surface-secondary)] px-6 py-3 text-[11px] font-bold uppercase tracking-[0.12em] sm:grid" style={{ borderColor: SV.border, color: SV.muted }}><span>Client</span><span>Mașină</span><span>Nr. Înm.</span><span>Data fin.</span><span>Angajat</span><span>Timp total</span><span>Status financiar</span><span className="text-right">PDF</span></div>{finalizedCars.length === 0 ? <div className="p-8 text-center text-sm" style={{ color: SV.sec }}>Nu există mașini finalizate.</div> : finalizedCars.map((car: Car) => <div key={car.id} className="grid grid-cols-1 gap-2 border-b px-6 py-4 last:border-0 sm:grid-cols-[1fr_1fr_1fr_1fr_1.2fr_1fr_1.2fr_60px] sm:items-center sm:gap-4" style={{ borderColor: SV.border }}><span className="text-sm font-semibold" style={{ color: SV.navy }}>{car.client_name}</span><span className="text-sm" style={{ color: SV.sec }}>{car.make} {car.model}</span><span className="text-sm font-bold" style={{ color: SV.navy }}>{car.license_plate}</span><span className="text-sm" style={{ color: SV.sec }}>{car.completed_at ? new Date(car.completed_at).toLocaleDateString('ro-RO') : '—'}</span>{(() => { const n = employeeName(car.assigned_employee_id); return <span className="flex min-w-0 items-center gap-2"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold" style={{ background: SV.lav, color: SV.purple }}>{n[0]}</span><span className="truncate text-sm font-medium" style={{ color: SV.navy }}>{n}</span></span>; })()}<span className="font-mono text-sm" style={{ color: 'var(--text-secondary)' }}>{formatShortDuration(totalWorkedSeconds(car.jobs))}</span><select defaultValue={car.financial_status} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => void updateFinancial(car, e.target.value)} className={`h-9 rounded-lg border px-2 text-xs font-bold ${financialStyles[car.financial_status as FinancialStatus] ?? 'border-[var(--border)] text-[var(--text-secondary)]'}`}>{financialOptions.map((f: FinancialStatus) => <option key={f} value={f}>{financialLabels[f]}</option>)}</select><button onClick={() => openReportModal(car)} className="justify-self-end rounded-lg p-1.5 transition hover:bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]" style={{ color: SV.purple }} title="Generează PDF"><FileText size={16} /></button></div>)}</div>
 <div className="grid gap-5 xl:grid-cols-2">
 <div className="rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}>
 <h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>În lucru ({inLucruCars.length})</h3>
@@ -1281,8 +1307,9 @@ function ReportsView({ cars, employees, rates, employeeName }: { cars: Car[]; em
 </div>
 </div>
 <p className="pt-2 pb-4 text-center text-xs" style={{ color: SV.muted }}>Rapoartele sunt actualizate în timp real.</p>
-{showGenerate && <Modal title="Generează raport PDF" onClose={() => setShowGenerate(false)}>
+{showGenerate && <Modal title={`Generează PDF — ${selectedReportCar ? selectedReportCar.license_plate : 'all cars'}`} onClose={() => setShowGenerate(false)}>
 <div className="space-y-5 p-6">
+<p className="rounded-lg border px-3 py-2 text-xs" style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>Raport pentru: {selectedReportCar ? `${selectedReportCar.license_plate} (${selectedReportCar.make ?? ''} ${selectedReportCar.model ?? ''})` : 'toate mașinile'}</p>
 <div>
 <p className="mb-2 text-xs font-bold uppercase tracking-[0.14em]" style={{ color: 'var(--text-secondary)' }}>Tip raport</p>
 <div className="grid gap-3 sm:grid-cols-2">
@@ -1762,10 +1789,10 @@ function EventModesCard({ employees, onRefresh }: { employees: Employee[]; onRef
 
 function SettingsView({ schedule, rates, employees, cars, onRefresh, onGoToEmployees }: { schedule: Schedule | null; rates: Rates | null; employees: Employee[]; cars: Car[]; onRefresh: () => Promise<void>; onGoToEmployees?: () => void }) {
   const [message, setMessage] = useState('');
-  const [form, setForm] = useState({ work_start: schedule?.work_start?.slice(0, 5) ?? '07:00', break_start: schedule?.break_start?.slice(0, 5) ?? '13:00', break_end: schedule?.break_end?.slice(0, 5) ?? '14:00', work_end: schedule?.work_end?.slice(0, 5) ?? '18:00', normal_rate: rates?.normal_rate ?? 100, urgent_rate: rates?.urgent_rate ?? 150, warranty_rate: rates?.warranty_rate ?? 0, overtime_rate: rates?.overtime_rate ?? 150 });
+  const [form, setForm] = useState({ work_start: schedule?.work_start?.slice(0, 5) ?? '07:00', break_start: schedule?.break_start?.slice(0, 5) ?? '13:00', break_end: schedule?.break_end?.slice(0, 5) ?? '14:00', work_end: schedule?.work_end?.slice(0, 5) ?? '18:00', normal_rate: rates?.normal_rate ?? 100, urgent_rate: rates?.urgent_rate ?? 150, warranty_rate: rates?.warranty_rate ?? 0, overtime_rate: rates?.overtime_rate ?? 150, vat_rate: rates?.vat_rate ?? 21 });
   const save = async (): Promise<void> => {
     if (schedule) await supabase.from('work_schedule').update({ work_start: form.work_start, work_end: form.work_end, break_start: form.break_start, break_end: form.break_end }).eq('id', schedule.id);
-    if (rates) await supabase.from('rates').update({ normal_rate: form.normal_rate, urgent_rate: form.urgent_rate, warranty_rate: form.warranty_rate, overtime_rate: form.overtime_rate }).eq('id', rates.id);
+    if (rates) await supabase.from('rates').update({ normal_rate: form.normal_rate, urgent_rate: form.urgent_rate, warranty_rate: form.warranty_rate, overtime_rate: form.overtime_rate, vat_rate: form.vat_rate }).eq('id', rates.id);
     setMessage('Setările au fost salvate'); await onRefresh(); window.setTimeout(() => setMessage(''), 2500);
   };
   // UI-only: formularul din panoul drept — aceeași inserare ca EmployeeModal (mode 'add').
@@ -1806,6 +1833,16 @@ function SettingsView({ schedule, rates, employees, cars, onRefresh, onGoToEmplo
 {timeFields.map(([key, label]) => <label key={key} className="block text-[13px] font-semibold" style={{ color: SV.muted }}>{label}<span className="relative mt-2 block"><input type="time" value={form[key]} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [key]: e.target.value })} className="h-[50px] w-full rounded-[10px] border bg-[var(--surface)] px-3 pr-9 text-[15px] font-semibold outline-none focus:border-[var(--primary)]" style={{ borderColor: SV.border, color: SV.navy }} /><Clock size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2" style={{ color: SV.muted }} /></span></label>)}
 </div>
 </div>
+<div className="rounded-[18px] border bg-[var(--surface)] p-6" style={{ borderColor: SV.border }}>
+<div className="flex items-start gap-3">
+<span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ background: 'color-mix(in srgb, var(--info) 14%, transparent)', color: 'var(--info)' }}><Percent size={18} /></span>
+<div><h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>Cotă TVA</h3><p className="mt-0.5 text-sm" style={{ color: SV.sec }}>Se aplică automat la finalul fiecărui raport PDF, fără a modifica tarifele pe oră.</p></div>
+</div>
+<div className="mt-5 max-w-xs">
+<label className="block text-[13px] font-semibold" style={{ color: SV.muted }}>Cotă TVA (%)<span className="relative mt-2 block"><input type="number" min="0" step="0.1" value={form.vat_rate} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, vat_rate: Math.max(0, Number(e.target.value)) })} className="h-[50px] w-full rounded-[10px] border bg-[var(--surface)] px-3 pr-9 text-[18px] font-bold outline-none focus:border-[var(--primary)] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" style={{ borderColor: SV.border, color: SV.navy }} /><span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold" style={{ color: SV.muted }}>%</span></span></label>
+</div>
+</div>
+
 <div className="rounded-[18px] border bg-[var(--surface)] p-6" style={{ borderColor: SV.border }}>
 <div className="flex items-start gap-3">
 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ background: 'color-mix(in srgb, var(--success) 14%, transparent)', color: 'var(--success)' }}><DollarSign size={18} /></span>

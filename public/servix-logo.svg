@@ -1,0 +1,69 @@
+<svg width="1200" height="1200" viewBox="0 0 1200 1200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="180" y1="120" x2="1020" y2="980" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B0D13"/>
+      <stop offset="0.5" stop-color="#11121D"/>
+      <stop offset="1" stop-color="#090B12"/>
+    </linearGradient>
+    <linearGradient id="silver" x1="250" y1="210" x2="960" y2="900" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F5F7FA"/>
+      <stop offset="0.18" stop-color="#D0D4DB"/>
+      <stop offset="0.38" stop-color="#F8FAFF"/>
+      <stop offset="0.52" stop-color="#8A8F9E"/>
+      <stop offset="0.7" stop-color="#EDF2FF"/>
+      <stop offset="0.82" stop-color="#B7BCC7"/>
+      <stop offset="1" stop-color="#F6F8FF"/>
+    </linearGradient>
+    <linearGradient id="purple" x1="280" y1="120" x2="940" y2="940" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F0D8FF"/>
+      <stop offset="0.16" stop-color="#D4A7FF"/>
+      <stop offset="0.32" stop-color="#A95DFF"/>
+      <stop offset="0.5" stop-color="#7D38FF"/>
+      <stop offset="0.7" stop-color="#C476FF"/>
+      <stop offset="1" stop-color="#F5EEFF"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="textGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="1200" fill="url(#bg)"/>
+
+  <g opacity="0.8" filter="url(#glow)">
+    <path d="M276 810C367 738 440 696 540 642L646 579C706 544 745 518 785 473C819 435 837 392 833 336C829 277 793 223 735 188C676 152 609 138 552 146C474 156 420 194 372 245L314 196C381 130 467 88 560 80C671 69 766 112 833 190C899 267 932 345 934 426C938 513 904 594 838 660C786 713 722 755 642 802L548 857C496 887 441 909 381 916L339 844C392 832 432 811 478 784L556 735C611 704 651 674 700 640C757 600 806 563 848 511L886 465C813 561 737 619 651 670L572 718C521 748 476 775 430 798L276 810Z" fill="url(#purple)" opacity="0.34"/>
+  </g>
+
+  <g filter="url(#glow)">
+    <path d="M279 365L341 286L433 320L508 251L611 338L711 249L819 314L882 285L892 337L817 400L735 340L643 421L555 338L457 421L365 341L290 390L279 365Z" fill="url(#silver)" stroke="#F5F6FF" stroke-width="11"/>
+    <path d="M328 410L474 514L596 375L717 514L851 404" stroke="#D9C9FF" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M352 422L483 512L595 419L706 512L845 422" stroke="#7D47FF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <g transform="translate(120 110)">
+    <path d="M707 375C779 406 831 451 864 510C888 550 898 590 898 631C898 733 835 825 739 876C665 915 596 928 502 920C459 917 415 908 371 890C439 986 557 1019 651 1012C764 1005 858 946 918 866C979 784 998 688 979 585C972 548 960 510 941 473L707 375Z" fill="url(#silver)" opacity="0.8"/>
+    <path d="M321 614C349 677 393 727 444 760C495 794 548 812 607 816C682 821 749 806 806 771C793 729 776 694 753 659C699 581 641 533 558 496C482 461 409 442 331 447C314 500 314 560 321 614Z" fill="url(#purple)" opacity="0.95"/>
+    <path d="M698 633C622 573 540 533 447 512C387 498 332 490 262 487C325 576 385 633 472 680C582 738 689 778 819 813C859 825 895 840 929 861C958 842 978 813 990 775C943 708 826 668 698 633Z" fill="url(#silver)" opacity="0.92"/>
+    <path d="M359 613C372 681 402 742 452 787C499 828 553 851 609 858C569 913 502 953 436 968C321 995 225 956 167 872C110 791 95 693 120 612C169 651 232 675 298 682C316 654 335 634 359 613Z" fill="url(#purple)" opacity="0.96"/>
+    <path d="M468 879C544 840 612 795 664 729C729 652 771 573 792 474C866 520 919 578 948 659C984 757 973 859 922 936C872 1013 783 1060 687 1068C628 1074 576 1064 531 1038C523 991 497 924 468 879Z" fill="url(#silver)" opacity="0.84"/>
+  </g>
+
+  <g filter="url(#glow)">
+    <path d="M126 745C155 676 197 624 256 579L228 534C152 593 98 674 68 768C57 801 54 836 58 874L92 871C92 834 104 792 126 745Z" fill="url(#purple)"/>
+    <path d="M1057 745C1028 676 986 624 927 579L955 534C1031 593 1085 674 1115 768C1126 801 1129 836 1125 874L1091 871C1091 834 1079 792 1057 745Z" fill="url(#purple)"/>
+  </g>
+
+  <g filter="url(#textGlow)">
+    <text x="600" y="948" text-anchor="middle" font-size="220" font-weight="900" font-family="Segoe UI, Arial, sans-serif" letter-spacing="10" fill="url(#silver)">SERVIX</text>
+  </g>
+</svg>

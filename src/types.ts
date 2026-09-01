@@ -117,6 +117,7 @@ export interface Rates {
   urgent_rate: number;
   warranty_rate: number;
   overtime_rate: number;
+  vat_rate: number;
 }
 
 export interface ThemeColors {
