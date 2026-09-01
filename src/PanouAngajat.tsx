@@ -265,6 +265,26 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
       overtime_seconds: (job.overtime_seconds ?? 0) + overlapSeconds(schedule, S, nowMs, job.is_overtime ? 'ot' : 'normal'),
     };
   };
+// După o finalizare efectivă a unei lucrări, sincronizează cars.completed_at
+  // DOAR dacă TOATE lucrările mașinii au acum status 'finalizat'. Aceeași logică
+  // ca în admin (App.tsx updateJob). Rulează pe ambele căi de scriere (RPC și fallback)
+  // pentru a acoperi finalizările făcute din panoul angajatului
+  // (Admin → Mașini → Finalizate astăzi filtrează după cars.completed_at).
+  const syncCarCompletion = async (job: Job, completedAt: string): Promise<void> => {
+    const { data: carJobs, error: jobsErr } = await supabase.from('jobs').select('status').eq('car_id', job.car_id);
+    if (jobsErr) {
+      console.error('[syncCarCompletion]', formatDbError('SELECT jobs (verificare lucrări)', jobsErr));
+      return;
+    }
+    if (!Array.isArray(carJobs) || carJobs.length === 0) return;
+    if (carJobs.every((j) => j.status === 'finalizat')) {
+      const { error: carErr } = await supabase.from('cars').update({ completed_at: completedAt }).eq('id', job.car_id);
+      if (carErr) {
+        console.error('[syncCarCompletion]', formatDbError('UPDATE cars.completed_at', carErr));
+        setError('Lucrarea a fost finalizată, dar nu am putut sincroniza mașina (cars.completed_at).');
+      }
+    }
+  };
   const updateJob = async (job: Job, status: JobStatus, key: string): Promise<void> => {
     if (busy) return;
     setBusy(key); setError('');
@@ -311,6 +331,7 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
         const { error: upErr } = await supabase.from('jobs').update(patch).eq('id', job.id);
         if (!upErr) {
           await supabase.from('activity_log').insert({ employee_id: employee.id, car_id: job.car_id, job_id: job.id, action: status, detail: 'Angajatul a actualizat lucrarea' });
+          if (status === 'finalizat' && completedAt) await syncCarCompletion(job, completedAt);
           await onRefresh(); setBusy(null); return;
         }
         const technical = formatDbError('UPDATE jobs (fallback)', upErr);
@@ -328,6 +349,7 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
       setError(String(data?.reason));
       setBusy(null); return;
     }
+    if (status === 'finalizat' && completedAt) await syncCarCompletion(job, completedAt);
     await onRefresh(); setBusy(null);
   };
   const handleStart = async (job: Job): Promise<void> => {
@@ -407,8 +429,8 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
         {/* SIDEBAR — tabletă landscape: 224px cu etichete; mobil: doar iconițe */}
         <aside className="employee-sidebar flex w-[76px] flex-none flex-col items-center py-3 lg:w-[219px] lg:items-stretch lg:px-4 lg:py-5" style={{ background: 'var(--sidebar)', borderRight: `1px solid ${'var(--border)'}` }}>
           <div className="mb-6 text-center text-[15px] font-extrabold leading-tight lg:text-left lg:text-[18px]">
-            <span className="hidden lg:inline"><span style={{ color: 'var(--text-primary)' }}>Service</span><span style={{ color: 'var(--primary)' }}>X</span></span>
-            <span className="lg:hidden"><span style={{ color: 'var(--text-primary)' }}>SER</span><span style={{ color: 'var(--primary)' }}>VIX</span></span>
+            <span className="hidden lg:inline"><span style={{ color: 'var(--text-primary)' }}>Serv</span><span style={{ color: 'var(--primary)' }}>ix</span></span>
+            <span className="lg:hidden"><span style={{ color: 'var(--text-primary)' }}>Serv</span><span style={{ color: 'var(--primary)' }}>ix</span></span>
           </div>
           <nav className="flex w-full flex-1 flex-col items-center gap-1.5 lg:items-stretch">
             {meniu.map((m) => (
@@ -438,7 +460,7 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
               </button>
             )}
             <div className="mt-2 hidden border-t pt-2 lg:block" style={{ borderColor: 'var(--border)' }}>
-              <div className="text-[10px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>© 2024 ServiceX<br />Toate drepturile rezervate.</div>
+              <div className="text-[10px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>© 2026 Servix<br />Toate drepturile rezervate.</div>
               <div className="mt-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>Versiune 1.0.0 · <span style={{ color: 'var(--success)' }}>● Sistem online</span></div>
             </div>
           </div>
@@ -450,7 +472,7 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
           <header className="flex h-[64px] items-center justify-between px-5" style={{ background: 'var(--surface)', borderBottom: `1px solid ${'var(--border)'}` }}>
             <div className="flex items-center gap-5">
               <div className="text-[22px] font-extrabold tracking-tight">
-                <span style={{ color: 'var(--text-primary)' }}>SER</span><span style={{ color: 'var(--primary)' }}>VIX</span>
+                <span style={{ color: 'var(--text-primary)' }}>Serv</span><span style={{ color: 'var(--primary)' }}>ix</span>
               </div>
               <div className="flex items-center gap-2">
                 <Clock3 size={16} style={{ color: 'var(--text-secondary)' }} />
@@ -461,11 +483,16 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
               </div>
             </div>
             <div className="flex items-center gap-2.5">
-              {activeSessions > 0 && (
-                <span className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ background: 'color-mix(in srgb, var(--success) 14%, transparent)', color: 'var(--success)' }}>
-                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--success)' }} />
-                  {activeSessions} {activeSessions === 1 ? 'sesiune activă' : 'sesiuni active'}
-                </span>
+              {onChange && (
+                <button
+                  onClick={onChange}
+                  title="Schimbă angajatorul"
+                  className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-[13px] font-bold uppercase tracking-wide transition active:scale-[0.98] hover:brightness-110"
+                  style={{ background: 'var(--primary)', color: '#FFFFFF', border: '1px solid var(--primary)' }}
+                >
+                  <LogOut size={16} />
+                  SCHIMBĂ ANGAJATUL
+                </button>
               )}
               {employee.avatar_url
                 ? <img src={employee.avatar_url} alt={employee.name} className="h-9 w-9 rounded-full border-2 object-cover" style={{ borderColor: 'var(--primary)' }} />

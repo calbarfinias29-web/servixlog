@@ -192,7 +192,7 @@ function Landing({ employees, onEmployee, onAdmin, children }: { employees: Empl
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl text-white" style={{ background: 'var(--primary)' }}><Wrench size={20} strokeWidth={2.5} /></div>
           <div>
-            <div className="text-2xl font-extrabold tracking-tight" style={{ color: 'var(--text-primary)' }}>SERVIX</div>
+            <div className="text-2xl font-extrabold tracking-tight" style={{ color: 'var(--text-primary)' }}>Servix</div>
             <div className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: 'var(--text-secondary)' }}>Atelier management</div>
           </div>
         </div>
@@ -219,7 +219,7 @@ function Landing({ employees, onEmployee, onAdmin, children }: { employees: Empl
           {employees.filter((e: Employee) => e.role === 'employee').length === 0 && <div className="col-span-3 rounded-xl border border-dashed p-10 text-center" style={{ background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>Nu există angajați activi.</div>}
         </div>
         : <div className="mx-auto max-w-sm rounded-xl p-8 shadow-2xl" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-            <div className="mb-2 text-center text-[26px] font-extrabold tracking-tight"><span style={{ color: 'var(--text-primary)' }}>SERV</span><span style={{ color: 'var(--primary)' }}>IX</span></div>
+            <div className="mb-2 text-center text-[26px] font-extrabold tracking-tight"><span style={{ color: 'var(--text-primary)' }}>Serv</span><span style={{ color: 'var(--primary)' }}>ix</span></div>
             <p className="mb-6 text-center text-xs font-bold uppercase tracking-[0.22em]" style={{ color: 'var(--secondary)' }}>Acces angajat</p>
             <div className="mb-6 text-center">
               {selectedEmp.avatar_url
@@ -251,7 +251,7 @@ function Landing({ employees, onEmployee, onAdmin, children }: { employees: Empl
           </div>
         </div>
       </div>
-      <footer className="flex items-center justify-between border-t pt-5 text-xs" style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}><span>Acces privat • Service intern</span><span>SERVIX © 2026</span></footer>
+      <footer className="flex items-center justify-between border-t pt-5 text-xs" style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}><span>Acces privat • Service intern</span><span>Servix © 2026</span></footer>
       {children}
     </div>
   </main>
@@ -300,9 +300,24 @@ function EmployeePanel({ employee, cars, schedule, rates, employees, onRefresh, 
       if (job.is_overtime) payload.overtime_seconds = (job.overtime_seconds ?? 0) + elapsed;
       payload.started_at = null;
     }
-    if (status === 'finalizat') payload.completed_at = new Date().toISOString();
+    const completedAt = status === 'finalizat' ? new Date().toISOString() : null;
+    if (completedAt) payload.completed_at = completedAt;
     const { error } = await supabase.from('jobs').update(payload).eq('id', job.id);
-    if (!error) { await supabase.from('activity_log').insert({ employee_id: employee.id, car_id: job.car_id, job_id: job.id, action: status, detail: `${employee.name} a actualizat lucrarea` }); await onRefresh(); }
+    if (error) { setStartError('Nu am putut actualiza lucrarea.'); return; }
+    // După actualizarea lucrării: sincronizează cars.completed_at DOAR dacă după
+    // această finalizare TOATE lucrările mașinii au status finalizat. Se folosește
+    // același timestamp (completedAt) ca pe jobs.completed_at.
+    if (status === 'finalizat') {
+      const { data: carJobs, error: jobsErr } = await supabase.from('jobs').select('status').eq('car_id', job.car_id);
+      if (jobsErr) {
+        setStartError('Lucrarea a fost finalizată, dar nu am putut verifica celelalte lucrări.');
+      } else if (Array.isArray(carJobs) && carJobs.length > 0 && carJobs.every((j) => j.status === 'finalizat')) {
+        const { error: carErr } = await supabase.from('cars').update({ completed_at: completedAt }).eq('id', job.car_id);
+        if (carErr) setStartError('Lucrarea a fost finalizată, dar nu am putut sincroniza mașina.');
+      }
+    }
+    await supabase.from('activity_log').insert({ employee_id: employee.id, car_id: job.car_id, job_id: job.id, action: status, detail: `${employee.name} a actualizat lucrarea` });
+    await onRefresh();
   };
   const handleStart = async (job: Job): Promise<void> => {
     if (breakActive) return;
