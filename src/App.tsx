@@ -118,7 +118,7 @@ function applyTheme(colors: ThemeColors): void {
   Object.entries(colors).forEach(([key, value]) => { root.style.setProperty(key, value); });
 }
 
-const SERVIX_LOGO_PATH = '/servix-logo.png';
+const SERVIX_LOGO_PATH = '/servix-logo12 (1).png';
 
 // SERVICEX PREMIUM — aceeași interfață, două palete de token-uri.
 // Light = business / clean / premium; Dark = business / technical / premium.
@@ -772,7 +772,7 @@ function AdminPanel({ employees, cars, appointments, schedule, rates, themes, on
   {activeTab === 'employees' && <EmployeesView employees={employees} cars={cars} onRefresh={onRefresh} />}
   {activeTab === 'cars' && <CarsView cars={filteredCars} query={query} setQuery={setQuery} statusFilter={statusFilter} setStatusFilter={setStatusFilter} priorityFilter={priorityFilter} setPriorityFilter={setPriorityFilter} selectedEmployee={selectedEmployee} setSelectedEmployee={setSelectedEmployee} demoFilter={demoFilter} setDemoFilter={setDemoFilter} financialFilter={financialFilter} setFinancialFilter={setFinancialFilter} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} employees={employees} employeeName={employeeName} onShowCar={setHistoryCar} onAddCar={() => setShowAdd(true)} />}
   {activeTab === 'jobs' && <JobsView cars={cars} employees={employees} employeeName={employeeName} onShowCar={setHistoryCar} />}
-  {activeTab === 'reports' && <ReportsView cars={cars} employees={employees} rates={rates} employeeName={employeeName} />}
+  {activeTab === 'reports' && <ReportsView cars={cars} employees={employees} rates={rates} employeeName={employeeName} onRefresh={onRefresh} />}
   {activeTab === 'appointments' && <AppointmentsView appointments={appointments} cars={cars} employees={employees} employeeName={employeeName} onRefresh={onRefresh} />}
   {activeTab === 'themes' && <ThemesView themes={themes} onRefresh={onRefresh} adminTheme={adminTheme} employeeTheme={employeeTheme} onChangeAdminTheme={onChangeAdminTheme} onChangeEmployeeTheme={onChangeEmployeeTheme} />}
   {activeTab === 'settings' && <SettingsView schedule={schedule} rates={rates} employees={employees} cars={cars} onRefresh={onRefresh} onGoToEmployees={() => setActiveTab('employees')} />}
@@ -1223,7 +1223,7 @@ function slugify(s: string): string {
 }
 
 
-function ReportsView({ cars, employees, rates, employeeName }: { cars: Car[]; employees: Employee[]; rates: Rates | null; employeeName: (id: string | null) => string }) {
+function ReportsView({ cars, employees, rates, employeeName, onRefresh }: { cars: Car[]; employees: Employee[]; rates: Rates | null; employeeName: (id: string | null) => string; onRefresh: () => Promise<void> }) {
   const finalizedCars = cars.filter((c: Car) => getCarStatus(c.jobs ?? []) === 'finalizata');
   const inLucruCars = cars.filter((c: Car) => getCarStatus(c.jobs ?? []) === 'in_lucru');
   const partsCars = cars.filter((c: Car) => getCarStatus(c.jobs ?? []) === 'asteptare_piese');
@@ -1231,6 +1231,53 @@ function ReportsView({ cars, employees, rates, employeeName }: { cars: Car[]; em
   const neincasate = finalizedCars.filter((c: Car) => c.financial_status === 'neincasat');
   const facturate = finalizedCars.filter((c: Car) => c.financial_status === 'facturat');
   const nefacturate = finalizedCars.filter((c: Car) => c.financial_status === 'nefacturat');
+  // ================================================================
+  // MONITOR „ÎN LUCRU” (live): timer local din started_at — baza de date rămâne sursa.
+
+  const [now, setNow] = useState(Date.now());
+  const [monitorCarId, setMonitorCarId] = useState<string | null>(null);
+  const [transferEmpId, setTransferEmpId] = useState('');
+  const [transferMsg, setTransferMsg] = useState('');
+  useEffect(() => { const id = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(id); }, []);
+  // Re-read datale periodic (fără refresh manual) doar cât timp pagina este deschisă.
+  useEffect(() => { const id = window.setInterval(() => { void onRefresh(); }, 10000); return () => window.clearInterval(id); }, [onRefresh]);
+const jobLiveTotalSec = (j: Job): number => {
+    const base = j.worked_seconds ?? 0;
+    if (j.status !== 'in_lucru' || !j.started_at) return base;
+    const elapsed = Math.max(0, Math.floor((now - new Date(j.started_at).getTime()) / 1000));
+    return base + elapsed;
+  };
+const jobOvertimeTotSec = (j: Job): number => {
+    const ov = j.overtime_seconds ?? 0;
+    if (j.is_overtime && j.started_at) {
+      const elapsed = Math.max(0, Math.floor((now - new Date(j.started_at).getTime()) / 1000));
+      return ov + elapsed;
+    }
+    return ov;
+  };
+  interface MonitorEntry { car: Car; job: Job; emp: string; startedAt: string | null; totalSec: number; overtimeSec: number; }
+  const activeEntries: MonitorEntry[] = cars
+    .flatMap((car: Car) => (car.jobs ?? []).filter((j: Job) => j.status === 'in_lucru').map((j: Job) => ({ car, job: j, emp: employeeName(car.assigned_employee_id), startedAt: j.started_at, totalSec: jobLiveTotalSec(j), overtimeSec: jobOvertimeTotSec(j) })))
+    .sort((a: MonitorEntry, b: MonitorEntry) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''));
+  const selectedMonitorEntry: MonitorEntry | null = monitorCarId ? activeEntries.find((e: MonitorEntry) => e.car.id === monitorCarId) ?? null : null;
+  const employeesList = employees.filter((e: Employee) => e.role === 'employee');
+  const activeByEmployee = employeesList.map((e: Employee) => ({ e, entries: activeEntries.filter((x: MonitorEntry) => x.car.assigned_employee_id === e.id) }));
+const handleTransfer = async (car: Car): Promise<void> => {
+    if (!transferEmpId || transferEmpId === car.assigned_employee_id) return;
+    setTransferMsg('');
+    const adminId = employees.find((e: Employee) => e.role === 'admin')?.id ?? null;
+    const res = await supabase.rpc('admin_transfer_car', { p_car_id: car.id, p_new_employee_id: transferEmpId, p_admin_id: adminId });
+    if (res.error || (res.data && (res.data as { ok?: boolean } | null)?.ok === false)) {
+      const up = await supabase.from('cars').update({ assigned_employee_id: transferEmpId }).eq('id', car.id);
+      if (up.error) { setTransferMsg('Nu am putut transfera mașina.'); return; }
+      const newEmp = employeesList.find((e: Employee) => e.id === transferEmpId);
+      await supabase.from('activity_log').insert({ employee_id: null, car_id: car.id, job_id: (car.jobs ?? []).find((j: Job) => j.status === 'in_lucru')?.id ?? null, action: 'transfer', detail: `Administratorul a transferat lucrarea de la ${employeeName(car.assigned_employee_id)} la ${newEmp?.name ?? '?'}` });
+    } else if (res.data && (res.data as { ok?: boolean }).ok === true) {
+      await supabase.from('activity_log').insert({ employee_id: transferEmpId, car_id: car.id, job_id: (car.jobs ?? []).find((j: Job) => j.status === 'in_lucru')?.id ?? null, action: 'transfer', detail: 'Administratorul a transferat lucrarea (istoric păstrat)' }).catch(() => undefined);
+    }
+    setTransferMsg('Mașina a fost transferată — timpul lucrat rămâne păstrat.');
+    setMonitorCarId(null); await onRefresh();
+  };
   const updateFinancial = async (car: Car, value: string): Promise<void> => {
     await supabase.from('cars').update({ financial_status: value }).eq('id', car.id);
   };
@@ -1287,13 +1334,66 @@ function ReportsView({ cars, employees, rates, employeeName }: { cars: Car[]; em
 <div className="grid gap-5 xl:grid-cols-2">
 <div className="rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}>
 <h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>În lucru ({inLucruCars.length})</h3>
-<div className="mt-4 space-y-3">{inLucruCars.length === 0 ? <p className="py-4 text-center text-sm" style={{ color: SV.sec }}>Nu există mașini în lucru.</p> : inLucruCars.map((car: Car) => <div key={car.id} className="flex items-center justify-between rounded-xl border p-3.5" style={{ borderColor: SV.border }}>
+<p className="mt-1 text-xs" style={{ color: SV.muted }}>Monitorizare în timp real — timerul crește automat, fără refresh.</p>
+{activeEntries.length === 0 ? <p className="mt-4 py-4 text-center text-sm" style={{ color: SV.sec }}>Nu există lucrări active în acest moment.</p> : (
+<div className="mt-4 space-y-3">{activeEntries.map((en: MonitorEntry) => (
+<div key={en.job.id}>
+<button onClick={() => { setMonitorCarId(monitorCarId === en.car.id ? null : en.car.id); setTransferMsg(''); }} className="flex w-full items-center justify-between rounded-xl border p-3.5 text-left transition hover:shadow-sm" style={{ borderColor: monitorCarId === en.car.id ? SV.purple : SV.border, background: monitorCarId === en.car.id ? 'color-mix(in srgb, var(--primary) 6%, transparent)' : 'transparent' }}>
 <div className="flex min-w-0 items-center gap-3">
-<span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold" style={{ background: SV.lav, color: SV.purple }}>{(car.client_name || '?')[0]}</span>
-<div className="min-w-0"><p className="truncate text-sm font-bold" style={{ color: SV.navy }}>{car.client_name}</p><p className="truncate text-xs" style={{ color: SV.sec }}>{car.make} {car.model} • {car.license_plate}</p><p className="mt-0.5 truncate text-xs" style={{ color: SV.muted }}>{employeeName(car.assigned_employee_id)} • {formatShortDuration(totalWorkedSeconds(car.jobs))}</p></div>
+<span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold" style={{ background: SV.lav, color: SV.purple }}>{(en.car.client_name || '?')[0]}</span>
+<div className="min-w-0">
+<p className="truncate text-sm font-bold" style={{ color: SV.navy }}>{en.car.license_plate} — {en.car.make} {en.car.model}</p>
+<p className="truncate text-xs" style={{ color: SV.sec }}>Client: {en.car.client_name}</p>
+<p className="mt-0.5 truncate text-xs" style={{ color: SV.sec }}>{en.emp} • {en.job.title}</p>
 </div>
+</div>
+<div className="flex shrink-0 flex-col items-end gap-1">
+<span className="font-mono text-sm font-bold" style={{ color: SV.purple }}>⏱ {formatDuration(en.totalSec)}</span>
 <Badge value="in_lucru" compact />
-</div>)}</div>
+</div>
+</button>
+{monitorCarId === en.car.id && (
+<div className="mt-2 rounded-xl border p-4" style={{ borderColor: SV.border, background: 'var(--surface-secondary)' }}>
+<div className="grid gap-2 text-xs" style={{ color: SV.sec }}>
+<p><span className="font-bold" style={{ color: SV.navy }}>Mașină:</span> {en.car.make} {en.car.model} ({en.car.license_plate})</p>
+<p><span className="font-bold" style={{ color: SV.navy }}>Client:</span> {en.car.client_name}</p>
+<p><span className="font-bold" style={{ color: SV.navy }}>Lucrare:</span> {en.job.title}</p>
+<p><span className="font-bold" style={{ color: SV.navy }}>Angajat:</span> {en.emp}</p>
+<p><span className="font-bold" style={{ color: SV.navy }}>Ora pornirii:</span> {en.startedAt ? new Date(en.startedAt).toLocaleTimeString('ro-RO') : '—'}</p>
+<p><span className="font-bold" style={{ color: SV.navy }}>Timp lucrat:</span> <span className="font-mono">{formatDuration(en.totalSec)}</span> (live)</p>
+<p><span className="font-bold" style={{ color: SV.navy }}>Timp peste program:</span> <span className="font-mono">{formatShortDuration(en.overtimeSec)}</span></p>
+<p><span className="font-bold" style={{ color: SV.navy }}>Status:</span> ÎN LUCRU</p>
+</div>
+<div className="mt-3 border-t pt-3" style={{ borderColor: SV.border }}>
+<p className="text-xs font-bold" style={{ color: SV.navy }}>Schimbă angajatul</p>
+<div className="mt-2 flex flex-wrap items-center gap-2">
+<select value={transferEmpId} onChange={(e) => setTransferEmpId(e.target.value)} className="rounded-lg border px-2 py-1.5 text-xs" style={{ borderColor: SV.border, background: 'var(--surface)', color: SV.navy }}>
+<option value="">— selectează angajat —</option>
+{employeesList.map((e: Employee) => <option key={e.id} value={e.id}>{e.name}</option>)}
+</select>
+<button onClick={() => void handleTransfer(en.car)} className="rounded-lg px-3 py-1.5 text-xs font-bold text-white" style={{ background: 'var(--button)' }}>Transferă</button>
+</div>
+{transferMsg && <p className="mt-2 text-xs" style={{ color: SV.sec }}>{transferMsg}</p>}
+<p className="mt-1 text-[11px]" style={{ color: SV.muted }}>Timpul deja lucrat rămâne păstrat în istoricul lucrării.</p>
+</div>
+</div>
+)}
+</div>
+))}</div>
+)}
+<div className="mt-5 border-t pt-4" style={{ borderColor: SV.border }}>
+<h4 className="text-xs font-bold uppercase tracking-[0.12em]" style={{ color: SV.muted }}>Situația angajaților</h4>
+<div className="mt-3 space-y-2">{activeByEmployee.map(({ e, entries }: { e: Employee; entries: MonitorEntry[] }) => (
+<div key={e.id} className="flex items-center justify-between rounded-lg border px-3 py-2" style={{ borderColor: SV.border }}>
+<span className="flex min-w-0 items-center gap-2"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold" style={{ background: SV.lav, color: SV.purple }}>{e.name[0]}</span><span className="truncate text-xs font-semibold" style={{ color: SV.navy }}>{e.name}</span></span>
+{entries.length === 0 ? <span className="text-xs font-semibold" style={{ color: 'var(--success)' }}>Liber</span> : (
+<span className="flex min-w-0 flex-col items-end">
+{entries.map((x: MonitorEntry) => <span key={x.job.id} className="truncate text-[11px]" style={{ color: SV.sec }}>{x.car.license_plate} • {x.job.title} • <span className="font-mono">{formatDuration(x.totalSec)}</span></span>)}
+</span>
+)}
+</div>
+))}</div>
+</div>
 </div>
 <div className="rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}>
 <h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>Așteptare piese ({partsCars.length})</h3>
