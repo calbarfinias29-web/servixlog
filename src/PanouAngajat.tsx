@@ -67,7 +67,7 @@ function overtimeWindowOpen(schedule: Schedule | null, ms: number): boolean {
 // 'normal' = work_start→break_start și break_end→work_end (plătit la tarif normal).
 // 'ot'     = pauza de prânz 13:00–14:00 ȘI noaptea 18:00–08:00 (tarif suplimentar).
 // Timpul din afara ferestrelor NU se contorizează nicăieri.
-function overlapSeconds(schedule: Schedule | null, startMs: number, endMs: number, kind: 'normal' | 'ot'): number {
+export function overlapSeconds(schedule: Schedule | null, startMs: number, endMs: number, kind: 'normal' | 'ot'): number {
   if (!schedule || endMs <= startMs) return 0;
   const win: Array<[string, string]> = kind === 'normal'
     ? [[schedule.work_start, schedule.break_start], [schedule.break_end, schedule.work_end]]
@@ -86,7 +86,7 @@ function overlapSeconds(schedule: Schedule | null, startMs: number, endMs: numbe
   return Math.floor(total / 1000);
 }
 
-function fmt(totalSeconds: number): string {
+export function fmt(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds));
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);

@@ -10,7 +10,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import type { Car, CarStatus, Employee, EmployeeEventSettings, EventMode, Job, JobStatus, Priority, Rates, Schedule, Theme, ThemeColors, View, FinancialStatus, FuelLevel, PlateHistoryEntry, MileageLogEntry, Appointment, AppointmentStatus, CarPhoto } from '@/types';
 import { generateReportPdf, title as pdfTitle, heading as pdfHeading, row as pdfRow, type PdfLine } from '@/lib/pdf';
-import PanouAngajat from '@/PanouAngajat';
+import PanouAngajat, { fmt as fmtHMS, overlapSeconds } from '@/PanouAngajat';
 import { VehicleImage } from '@/components/VehicleImage';
 import { VEHICLE_MAKES, modelsFor } from '@/lib/vehicleCatalog';
 import ServiceDarkDashboard from '@/ServiceDarkDashboard';
@@ -772,7 +772,7 @@ function AdminPanel({ employees, cars, appointments, schedule, rates, themes, on
   {activeTab === 'employees' && <EmployeesView employees={employees} cars={cars} onRefresh={onRefresh} />}
   {activeTab === 'cars' && <CarsView cars={filteredCars} query={query} setQuery={setQuery} statusFilter={statusFilter} setStatusFilter={setStatusFilter} priorityFilter={priorityFilter} setPriorityFilter={setPriorityFilter} selectedEmployee={selectedEmployee} setSelectedEmployee={setSelectedEmployee} demoFilter={demoFilter} setDemoFilter={setDemoFilter} financialFilter={financialFilter} setFinancialFilter={setFinancialFilter} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} employees={employees} employeeName={employeeName} onShowCar={setHistoryCar} onAddCar={() => setShowAdd(true)} />}
   {activeTab === 'jobs' && <JobsView cars={cars} employees={employees} employeeName={employeeName} onShowCar={setHistoryCar} />}
-  {activeTab === 'reports' && <ReportsView cars={cars} employees={employees} rates={rates} employeeName={employeeName} onRefresh={onRefresh} />}
+  {activeTab === 'reports' && <ReportsView cars={cars} employees={employees} rates={rates} schedule={schedule} employeeName={employeeName} onRefresh={onRefresh} />}
   {activeTab === 'appointments' && <AppointmentsView appointments={appointments} cars={cars} employees={employees} employeeName={employeeName} onRefresh={onRefresh} />}
   {activeTab === 'themes' && <ThemesView themes={themes} onRefresh={onRefresh} adminTheme={adminTheme} employeeTheme={employeeTheme} onChangeAdminTheme={onChangeAdminTheme} onChangeEmployeeTheme={onChangeEmployeeTheme} />}
   {activeTab === 'settings' && <SettingsView schedule={schedule} rates={rates} employees={employees} cars={cars} onRefresh={onRefresh} onGoToEmployees={() => setActiveTab('employees')} />}
@@ -1223,7 +1223,7 @@ function slugify(s: string): string {
 }
 
 
-function ReportsView({ cars, employees, rates, employeeName, onRefresh }: { cars: Car[]; employees: Employee[]; rates: Rates | null; employeeName: (id: string | null) => string; onRefresh: () => Promise<void> }) {
+function ReportsView({ cars, employees, rates, schedule, employeeName, onRefresh }: { cars: Car[]; employees: Employee[]; rates: Rates | null; schedule: Schedule | null; employeeName: (id: string | null) => string; onRefresh: () => Promise<void> }) {
   const finalizedCars = cars.filter((c: Car) => getCarStatus(c.jobs ?? []) === 'finalizata');
   const inLucruCars = cars.filter((c: Car) => getCarStatus(c.jobs ?? []) === 'in_lucru');
   const partsCars = cars.filter((c: Car) => getCarStatus(c.jobs ?? []) === 'asteptare_piese');
@@ -1241,23 +1241,21 @@ function ReportsView({ cars, employees, rates, employeeName, onRefresh }: { cars
   useEffect(() => { const id = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(id); }, []);
   // Re-read datale periodic (fără refresh manual) doar cât timp pagina este deschisă.
   useEffect(() => { const id = window.setInterval(() => { void onRefresh(); }, 10000); return () => window.clearInterval(id); }, [onRefresh]);
-const jobLiveTotalSec = (j: Job): number => {
-    const base = j.worked_seconds ?? 0;
-    if (j.status !== 'in_lucru' || !j.started_at) return base;
-    const elapsed = Math.max(0, Math.floor((now - new Date(j.started_at).getTime()) / 1000));
-    return base + elapsed;
+// Timerul Admin = EXACT logica angajatului (PanouAngajat): normalul live crește doar în
+// ferestrele normale (overlapSeconds 'normal'), overtime-ul DOAR dacă is_overtime e pornit
+// și doar în fereastra ot. „Timp total” = DOAR ore normale (identic cu angajatul).
+const jobLiveTimes = (j: Job): { normal: number; overtime: number } => {
+    const storedNormal = j.worked_seconds ?? 0;
+    const storedOvertime = j.overtime_seconds ?? 0;
+    if (j.status !== 'in_lucru' || !j.started_at) return { normal: storedNormal, overtime: storedOvertime };
+    const runStartMs = new Date(j.started_at).getTime();
+    const liveNormal = overlapSeconds(schedule, runStartMs, now, 'normal');
+    const liveOvertime = j.is_overtime ? overlapSeconds(schedule, runStartMs, now, 'ot') : 0;
+    return { normal: storedNormal + liveNormal, overtime: storedOvertime + liveOvertime };
   };
-const jobOvertimeTotSec = (j: Job): number => {
-    const ov = j.overtime_seconds ?? 0;
-    if (j.is_overtime && j.started_at) {
-      const elapsed = Math.max(0, Math.floor((now - new Date(j.started_at).getTime()) / 1000));
-      return ov + elapsed;
-    }
-    return ov;
-  };
-  interface MonitorEntry { car: Car; job: Job; emp: string; startedAt: string | null; totalSec: number; overtimeSec: number; }
+  interface MonitorEntry { car: Car; job: Job; emp: string; startedAt: string | null; normalSec: number; overtimeSec: number; totalSec: number; }
   const activeEntries: MonitorEntry[] = cars
-    .flatMap((car: Car) => (car.jobs ?? []).filter((j: Job) => j.status === 'in_lucru').map((j: Job) => ({ car, job: j, emp: employeeName(car.assigned_employee_id), startedAt: j.started_at, totalSec: jobLiveTotalSec(j), overtimeSec: jobOvertimeTotSec(j) })))
+    .flatMap((car: Car) => (car.jobs ?? []).filter((j: Job) => j.status === 'in_lucru').map((j: Job) => { const t = jobLiveTimes(j); return { car, job: j, emp: employeeName(car.assigned_employee_id), startedAt: j.started_at, normalSec: t.normal, overtimeSec: t.overtime, totalSec: t.normal }; }))
     .sort((a: MonitorEntry, b: MonitorEntry) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''));
   const selectedMonitorEntry: MonitorEntry | null = monitorCarId ? activeEntries.find((e: MonitorEntry) => e.car.id === monitorCarId) ?? null : null;
   const employeesList = employees.filter((e: Employee) => e.role === 'employee');
@@ -1348,7 +1346,7 @@ const handleTransfer = async (car: Car): Promise<void> => {
 </div>
 </div>
 <div className="flex shrink-0 flex-col items-end gap-1">
-<span className="font-mono text-sm font-bold" style={{ color: SV.purple }}>⏱ {formatDuration(en.totalSec)}</span>
+<span className="font-mono text-sm font-bold" style={{ color: SV.purple }}>⏱ {fmtHMS(en.totalSec)}</span>
 <Badge value="in_lucru" compact />
 </div>
 </button>
@@ -1360,8 +1358,9 @@ const handleTransfer = async (car: Car): Promise<void> => {
 <p><span className="font-bold" style={{ color: SV.navy }}>Lucrare:</span> {en.job.title}</p>
 <p><span className="font-bold" style={{ color: SV.navy }}>Angajat:</span> {en.emp}</p>
 <p><span className="font-bold" style={{ color: SV.navy }}>Ora pornirii:</span> {en.startedAt ? new Date(en.startedAt).toLocaleTimeString('ro-RO') : '—'}</p>
-<p><span className="font-bold" style={{ color: SV.navy }}>Timp lucrat:</span> <span className="font-mono">{formatDuration(en.totalSec)}</span> (live)</p>
-<p><span className="font-bold" style={{ color: SV.navy }}>Timp peste program:</span> <span className="font-mono">{formatShortDuration(en.overtimeSec)}</span></p>
+<p><span className="font-bold" style={{ color: SV.navy }}>Timp normal:</span> <span className="font-mono">{fmtHMS(en.normalSec)}</span></p>
+<p><span className="font-bold" style={{ color: SV.navy }}>Timp peste program:</span> <span className="font-mono">{fmtHMS(en.overtimeSec)}</span></p>
+<p><span className="font-bold" style={{ color: SV.navy }}>Timp total:</span> <span className="font-mono">{fmtHMS(en.totalSec)}</span> (live)</p>
 <p><span className="font-bold" style={{ color: SV.navy }}>Status:</span> ÎN LUCRU</p>
 </div>
 <div className="mt-3 border-t pt-3" style={{ borderColor: SV.border }}>
@@ -1388,7 +1387,7 @@ const handleTransfer = async (car: Car): Promise<void> => {
 <span className="flex min-w-0 items-center gap-2"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold" style={{ background: SV.lav, color: SV.purple }}>{e.name[0]}</span><span className="truncate text-xs font-semibold" style={{ color: SV.navy }}>{e.name}</span></span>
 {entries.length === 0 ? <span className="text-xs font-semibold" style={{ color: 'var(--success)' }}>Liber</span> : (
 <span className="flex min-w-0 flex-col items-end">
-{entries.map((x: MonitorEntry) => <span key={x.job.id} className="truncate text-[11px]" style={{ color: SV.sec }}>{x.car.license_plate} • {x.job.title} • <span className="font-mono">{formatDuration(x.totalSec)}</span></span>)}
+{entries.map((x: MonitorEntry) => <span key={x.job.id} className="truncate text-[11px]" style={{ color: SV.sec }}>{x.car.license_plate} • {x.job.title} • <span className="font-mono">{fmtHMS(x.totalSec)}</span></span>)}
 </span>
 )}
 </div>
