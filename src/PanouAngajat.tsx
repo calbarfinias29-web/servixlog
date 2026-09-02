@@ -2,7 +2,7 @@
 import { Home, CarFront, Wrench, History, UserRound, Clock3, Pause, Clock, Check, CheckCircle2, Play, Info, LogOut, X, Users, CalendarClock, FileBarChart, Settings } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { VehicleImage } from '@/components/VehicleImage';
-import type { Car, Employee, Job, JobStatus, Schedule } from '@/types';
+import type { Car, Employee, Job, JobStatus, Schedule, ScheduleDay } from '@/types';
 
 const C = {
   bg: '#0D0B14', card: '#181622', card2: '#1F1D2B',
@@ -42,25 +42,43 @@ function zonedMs(y: number, mo: number, d: number, h: number, mi: number): numbe
   const t = naive - tzOffsetMs(naive);
   return naive - tzOffsetMs(t);
 }
+
+export function getScheduleDay(schedule: Schedule, weekday: number): ScheduleDay {
+  const names = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const;
+  const name = names[weekday] ?? 'monday';
+  const active = schedule[`${name}_active` as keyof Schedule];
+  const start = schedule[`${name}_start` as keyof Schedule];
+  const end = schedule[`${name}_end` as keyof Schedule];
+  return {
+    active: typeof active === 'boolean' ? active : weekday >= 1 && weekday <= 5,
+    start: typeof start === 'string' ? start.slice(0, 5) : schedule.work_start.slice(0, 5),
+    end: typeof end === 'string' ? end.slice(0, 5) : schedule.work_end.slice(0, 5),
+  };
+}
 function inBreakNow(schedule: Schedule | null, ms: number): boolean {
   if (!schedule) return false;
   const p = bchParts(ms);
+  const day = getScheduleDay(schedule, new Date(Date.UTC(p.y, p.mo - 1, p.d)).getUTCDay());
+  if (!day.active) return false;
   const n = p.h * 60 + p.mi;
   return n >= minutesOf(schedule.break_start) && n < minutesOf(schedule.break_end);
 }
 function afterHoursNow(schedule: Schedule | null, ms: number): boolean {
   if (!schedule) return false;
   const p = bchParts(ms);
-  return p.h * 60 + p.mi >= minutesOf(schedule.work_end);
+  const day = getScheduleDay(schedule, new Date(Date.UTC(p.y, p.mo - 1, p.d)).getUTCDay());
+  return day.active && p.h * 60 + p.mi >= minutesOf(day.end);
 }
 // Fereastra legală pentru „CONTINUĂ PESTE PROGRAM”: 13:00–14:00 SAU 18:00–08:00.
 function overtimeWindowOpen(schedule: Schedule | null, ms: number): boolean {
   if (!schedule) return false;
   const p = bchParts(ms);
+  const day = getScheduleDay(schedule, new Date(Date.UTC(p.y, p.mo - 1, p.d)).getUTCDay());
   const n = p.h * 60 + p.mi;
+  if (!day.active) return true;
   return (n >= minutesOf(schedule.break_start) && n < minutesOf(schedule.break_end))
-    || n >= minutesOf(schedule.work_end)
-    || n < minutesOf(schedule.work_start);
+    || n >= minutesOf(day.end)
+    || n < minutesOf(day.start);
 }
 
 // Suprapunerea unui interval [start,end] cu ferestrele zilnice (în secunde).
@@ -69,13 +87,22 @@ function overtimeWindowOpen(schedule: Schedule | null, ms: number): boolean {
 // Timpul din afara ferestrelor NU se contorizează nicăieri.
 export function overlapSeconds(schedule: Schedule | null, startMs: number, endMs: number, kind: 'normal' | 'ot'): number {
   if (!schedule || endMs <= startMs) return 0;
-  const win: Array<[string, string]> = kind === 'normal'
-    ? [[schedule.work_start, schedule.break_start], [schedule.break_end, schedule.work_end]]
-    : [[schedule.break_start, schedule.break_end], [schedule.work_end, '24:00'], ['00:00', schedule.work_start]];
   let total = 0;
   let cursor = startMs;
   for (let i = 0; i < 62 && cursor < endMs; i++) {
     const p = bchParts(cursor);
+    const day = getScheduleDay(schedule, new Date(Date.UTC(p.y, p.mo - 1, p.d)).getUTCDay());
+    if (!day.active && kind === 'normal') { cursor = zonedMs(p.y, p.mo, p.d, 24, 0); continue; }
+    if (!day.active && kind === 'ot') {
+      const dayStart = zonedMs(p.y, p.mo, p.d, 0, 0);
+      const dayEnd = zonedMs(p.y, p.mo, p.d, 24, 0);
+      total += Math.max(0, Math.min(endMs, dayEnd) - Math.max(startMs, dayStart));
+      cursor = dayEnd;
+      continue;
+    }
+    const win: Array<[string, string]> = kind === 'normal'
+      ? [[day.start, schedule.break_start], [schedule.break_end, day.end]]
+      : [[schedule.break_start, schedule.break_end], [day.end, '24:00'], ['00:00', day.start]];
     const W = (t: string): number => zonedMs(p.y, p.mo, p.d, Math.floor(minutesOf(t) / 60), minutesOf(t) % 60);
     for (const [a, b] of win) {
       const wS = W(a); const wE = W(b);
@@ -148,7 +175,6 @@ function Btn({ bg, icon, label, border, onClick, disabled }: { bg: string; icon:
     </button>
   );
 }
-
 export default function PanouAngajat({ employee, cars, schedule, onRefresh, onChange }: {
   employee: Employee; cars: Car[]; schedule: Schedule | null; onRefresh: () => Promise<void>; onChange?: () => void;
 }) {

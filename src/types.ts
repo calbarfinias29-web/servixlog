@@ -99,6 +99,33 @@ export interface Schedule {
   work_end: string;
   break_start: string;
   break_end: string;
+  monday_active?: boolean;
+  monday_start?: string;
+  monday_end?: string;
+  tuesday_active?: boolean;
+  tuesday_start?: string;
+  tuesday_end?: string;
+  wednesday_active?: boolean;
+  wednesday_start?: string;
+  wednesday_end?: string;
+  thursday_active?: boolean;
+  thursday_start?: string;
+  thursday_end?: string;
+  friday_active?: boolean;
+  friday_start?: string;
+  friday_end?: string;
+  saturday_active?: boolean;
+  saturday_start?: string;
+  saturday_end?: string;
+  sunday_active?: boolean;
+  sunday_start?: string;
+  sunday_end?: string;
+}
+
+export interface ScheduleDay {
+  active: boolean;
+  start: string;
+  end: string;
 }
 
 export type EventMode = 'auto' | 'manual';

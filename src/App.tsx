@@ -8,15 +8,21 @@ import {
   UserPlus, Mail, Phone, Coins, MoreVertical, ChevronDown, DollarSign, SlidersHorizontal, Percent,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import type { Car, CarStatus, Employee, EmployeeEventSettings, EventMode, Job, JobStatus, Priority, Rates, Schedule, Theme, ThemeColors, View, FinancialStatus, FuelLevel, PlateHistoryEntry, MileageLogEntry, Appointment, AppointmentStatus, CarPhoto } from '@/types';
+import type { Car, CarStatus, Employee, EmployeeEventSettings, EventMode, Job, JobStatus, Priority, Rates, Schedule, ScheduleDay, Theme, ThemeColors, View, FinancialStatus, FuelLevel, PlateHistoryEntry, MileageLogEntry, Appointment, AppointmentStatus, CarPhoto } from '@/types';
 import { generateReportPdf, title as pdfTitle, heading as pdfHeading, row as pdfRow, type PdfLine } from '@/lib/pdf';
-import PanouAngajat, { fmt as fmtHMS, overlapSeconds } from '@/PanouAngajat';
+import PanouAngajat, { fmt as fmtHMS, getScheduleDay, overlapSeconds } from '@/PanouAngajat';
 import { VehicleImage } from '@/components/VehicleImage';
 import { VEHICLE_MAKES, modelsFor } from '@/lib/vehicleCatalog';
 import ServiceDarkDashboard from '@/ServiceDarkDashboard';
+import { EmployeeReportsTab } from '@/EmployeeReportsTab';
+import { normalizeSearch, searchIncludes } from '@/lib/search';
+import { CatalogAutocomplete, type CatalogOption } from '@/components/CatalogAutocomplete';
+
+let catalogFieldOptions: { makes: CatalogOption[]; models: CatalogOption[]; works: CatalogOption[] } = { makes: [], models: [], works: [] };
 
 function isInBreak(schedule: Schedule | null, date = new Date()): boolean {
   if (!schedule) return false;
+  if (!getScheduleDay(schedule, date.getDay()).active) return false;
   const now = date.getHours() * 60 + date.getMinutes();
   const bs = Number(schedule.break_start.slice(0, 2)) * 60 + Number(schedule.break_start.slice(3, 5));
   const be = Number(schedule.break_end.slice(0, 2)) * 60 + Number(schedule.break_end.slice(3, 5));
@@ -24,8 +30,10 @@ function isInBreak(schedule: Schedule | null, date = new Date()): boolean {
 }
 function isAfterHours(schedule: Schedule | null, date = new Date()): boolean {
   if (!schedule) return false;
+  const day = getScheduleDay(schedule, date.getDay());
+  if (!day.active) return false;
   const now = date.getHours() * 60 + date.getMinutes();
-  const we = Number(schedule.work_end.slice(0, 2)) * 60 + Number(schedule.work_end.slice(3, 5));
+  const we = Number(day.end.slice(0, 2)) * 60 + Number(day.end.slice(3, 5));
   return now >= we;
 }
 function isOvertimeWindowFn(schedule: Schedule | null, date = new Date()): boolean {
@@ -349,6 +357,7 @@ function EmployeePanel({ employee, cars, schedule, rates, employees, onRefresh, 
   const addJob = async (title: string): Promise<void> => {
     const maxOrder = (selectedCar?.jobs ?? []).reduce((max: number, j: Job) => Math.max(max, j.order_index), 0);
     await supabase.from('jobs').insert({ car_id: selectedCar!.id, title, order_index: maxOrder + 1 });
+    await supabase.from('work_catalog').upsert({ name: title, normalized_name: normalizeSearch(title) }, { onConflict: 'normalized_name' });
     await onRefresh();
   };
   const handleAssign = async (car: Car): Promise<void> => {
@@ -370,12 +379,12 @@ function EmployeePanel({ employee, cars, schedule, rates, employees, onRefresh, 
   const noJobs = !currentJob && !isDone;
   const timerColor = isWorking ? 'text-blue-700' : isBreak ? 'text-orange-600' : isParts ? 'text-amber-600' : 'text-[var(--text-primary)]';
   const pickerCars = useMemo(() => {
-    const q = pickerQuery.toLowerCase();
+    const q = normalizeSearch(pickerQuery);
     return cars.filter((car: Car) => {
-      const matchesQuery = `${car.license_plate} ${car.client_name} ${car.make ?? ''} ${car.model ?? ''}`.toLowerCase().includes(q);
-      const matchesPlateHistory = (car.plate_history ?? []).some((p: PlateHistoryEntry) => p.license_plate.toLowerCase().includes(q));
-      const matchesVin = (car.vin ?? '').toLowerCase().includes(q);
-      const matchesInternalId = (car.internal_id ?? '').toLowerCase().includes(q);
+      const matchesQuery = searchIncludes(`${car.license_plate} ${car.client_name} ${car.make ?? ''} ${car.model ?? ''}`, q);
+      const matchesPlateHistory = (car.plate_history ?? []).some((p: PlateHistoryEntry) => searchIncludes(p.license_plate, q));
+      const matchesVin = searchIncludes(car.vin, q);
+      const matchesInternalId = searchIncludes(car.internal_id, q);
       const searchMatch = matchesQuery || matchesPlateHistory || matchesVin || matchesInternalId;
       const cs = getCarStatus(car.jobs ?? []);
       const matchesFilter = pickerFilter === 'toate'
@@ -392,7 +401,7 @@ function EmployeePanel({ employee, cars, schedule, rates, employees, onRefresh, 
     <aside className="fixed inset-y-0 left-0 hidden w-[180px] flex-col border-r lg:flex" style={{ background: 'var(--sidebar)', borderColor: 'var(--border)' }}>
       <div className="flex flex-col h-full">
         {/* Profil sus */}
-        <div className="border-b p-4" style={{ borderColor: 'var(--border)' }}>
+        <div className="border-b p-4">
           <div className="flex items-center gap-3">
             {employee.avatar_url ? <img src={employee.avatar_url} alt={employee.name} className="h-10 w-10 rounded-full object-cover" /> : <span className="flex h-10 w-10 items-center justify-center rounded-full text-base font-bold" style={{ background: '#7C3AED', color: '#fff' }}>{employee.name[0]}</span>}
             <div className="min-w-0">
@@ -694,7 +703,7 @@ function NoJobsCard({ car, onPick, onDetails }: { car: Car; onPick: () => void; 
   return <div className="rounded-xl border bg-[var(--surface)] p-8 text-center shadow-sm" style={{ borderColor: 'var(--border)' }}><h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{car.license_plate}</h2><p className="mt-1 text-sm" style={{ color: 'var(--text-secondary)' }}>{car.client_name}</p><p className="mt-4 text-sm text-[var(--text-secondary)]">Nu există lucrări pentru această mașină.</p><div className="mt-6 space-y-3"><button onClick={onPick} className="flex w-full items-center justify-center gap-2 rounded-lg px-4 py-4 text-base font-bold text-white transition hover:brightness-110" style={{ background: '#7C3AED' }}><CarFront size={20} /> ALEGE ALTĂ MAȘINĂ</button><button onClick={onDetails} className="flex w-full items-center justify-center gap-2 rounded-lg border bg-[var(--card)] px-4 py-3 text-sm font-bold transition" style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}><Cog size={18} /> DETALII / SETĂRI LUCRARE</button></div></div>;
 }
 
-function DetailsModal({ car, jobs, onClose, onAddJob, onJobAction, breakActive, activeJobId }: { car: Car; jobs: Job[]; onClose: () => void; onAddJob: (title: string) => void; onJobAction: (job: Job, action: 'start' | 'stop' | 'parts' | 'finish') => void; breakActive: boolean; activeJobId?: string }) {
+function DetailsModal({ car, jobs, onClose, onAddJob, onJobAction, breakActive, activeJobId, workCatalog = [] }: { car: Car; jobs: Job[]; onClose: () => void; onAddJob: (title: string) => void; onJobAction: (job: Job, action: 'start' | 'stop' | 'parts' | 'finish') => void; breakActive: boolean; activeJobId?: string; workCatalog?: CatalogOption[] }) {
   const [newJobTitle, setNewJobTitle] = useState('');
   const sortedJobs = [...jobs].sort((a: Job, b: Job) => a.order_index - b.order_index);
   const handleAdd = (): void => { if (newJobTitle.trim()) { onAddJob(newJobTitle.trim()); setNewJobTitle(''); } };
@@ -709,9 +718,9 @@ function CarPicker({ cars, filter, onFilter, query, onQuery, onAssign, assigning
 // ============================================================
 // ADMIN PANEL (desktop)
 // ============================================================
-type AdminTab = 'dashboard' | 'employees' | 'cars' | 'jobs' | 'reports' | 'appointments' | 'settings' | 'themes';
+type AdminTab = 'dashboard' | 'employees' | 'cars' | 'jobs' | 'reports' | 'appointments' | 'themes' | 'settings';
 
-function AdminPanel({ employees, cars, appointments, schedule, rates, themes, onRefresh, onExit, adminTheme, employeeTheme, onChangeAdminTheme, onChangeEmployeeTheme }: { employees: Employee[]; cars: Car[]; appointments: Appointment[]; schedule: Schedule | null; rates: Rates | null; themes: Theme[]; onRefresh: () => Promise<void>; onExit: () => void; adminTheme: 'light' | 'dark'; employeeTheme: 'light' | 'dark'; onChangeAdminTheme: (m: 'light' | 'dark') => void; onChangeEmployeeTheme: (m: 'light' | 'dark') => void }) {
+function AdminPanel({ employees, cars, appointments, schedule, rates, themes, vehicleMakes, vehicleModels, workCatalog, onRefresh, onExit, adminTheme, employeeTheme, onChangeAdminTheme, onChangeEmployeeTheme }: { employees: Employee[]; cars: Car[]; appointments: Appointment[]; schedule: Schedule | null; rates: Rates | null; themes: Theme[]; vehicleMakes: CatalogOption[]; vehicleModels: CatalogOption[]; workCatalog: CatalogOption[]; onRefresh: () => Promise<void>; onExit: () => void; adminTheme: 'light' | 'dark'; employeeTheme: 'light' | 'dark'; onChangeAdminTheme: (m: 'light' | 'dark') => void; onChangeEmployeeTheme: (m: 'light' | 'dark') => void }) {
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'toate' | CarStatus | 'intarziata'>('toate');
@@ -727,7 +736,7 @@ function AdminPanel({ employees, cars, appointments, schedule, rates, themes, on
   const employeeName = (id: string | null): string => employees.find((e: Employee) => e.id === id)?.name ?? 'Nealocat';
 
   const filteredCars = useMemo(() => cars.filter((car: Car) => {
-    const matchesQuery = `${car.license_plate} ${car.client_name} ${car.make ?? ''} ${car.model ?? ''} ${car.vin ?? ''} ${car.internal_id ?? ''} ${(car.plate_history ?? []).map((p: PlateHistoryEntry) => p.license_plate).join(' ')}`.toLowerCase().includes(query.toLowerCase());
+    const matchesQuery = searchIncludes(`${car.license_plate} ${car.client_name} ${car.make ?? ''} ${car.model ?? ''} ${car.vin ?? ''} ${car.internal_id ?? ''} ${(car.plate_history ?? []).map((p: PlateHistoryEntry) => p.license_plate).join(' ')}`, query);
     const cs = getCarStatus(car.jobs ?? []);
     const matchesStatus = statusFilter === 'toate'
       || (statusFilter === 'intarziata' && isOverdue(car.deadline, cs))
@@ -771,12 +780,12 @@ function AdminPanel({ employees, cars, appointments, schedule, rates, themes, on
   {activeTab === 'dashboard' && <DashboardView employees={employees} cars={cars} appointments={appointments} rates={rates} schedule={schedule} employeeName={employeeName} onRefresh={onRefresh} onShowCar={setHistoryCar} onAddCar={() => setShowAdd(true)} onGoToCars={() => setActiveTab('cars')} onGoToAppointments={() => setActiveTab('appointments')} onGoToEmployees={() => setActiveTab('employees')} onGoToReports={() => setActiveTab('reports')} />}
   {activeTab === 'employees' && <EmployeesView employees={employees} cars={cars} onRefresh={onRefresh} />}
   {activeTab === 'cars' && <CarsView cars={filteredCars} query={query} setQuery={setQuery} statusFilter={statusFilter} setStatusFilter={setStatusFilter} priorityFilter={priorityFilter} setPriorityFilter={setPriorityFilter} selectedEmployee={selectedEmployee} setSelectedEmployee={setSelectedEmployee} demoFilter={demoFilter} setDemoFilter={setDemoFilter} financialFilter={financialFilter} setFinancialFilter={setFinancialFilter} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} employees={employees} employeeName={employeeName} onShowCar={setHistoryCar} onAddCar={() => setShowAdd(true)} />}
-  {activeTab === 'jobs' && <JobsView cars={cars} employees={employees} rates={rates} employeeName={employeeName} onShowCar={setHistoryCar} onRefresh={onRefresh} />}
+  {activeTab === 'jobs' && <JobsView cars={cars} employees={employees} rates={rates} employeeName={employeeName} onShowCar={setHistoryCar} onRefresh={onRefresh} workCatalog={workCatalog} />}
   {activeTab === 'reports' && <ReportsView cars={cars} employees={employees} rates={rates} schedule={schedule} employeeName={employeeName} onRefresh={onRefresh} />}
   {activeTab === 'appointments' && <AppointmentsView appointments={appointments} cars={cars} employees={employees} employeeName={employeeName} onRefresh={onRefresh} />}
   {activeTab === 'themes' && <ThemesView themes={themes} onRefresh={onRefresh} adminTheme={adminTheme} employeeTheme={employeeTheme} onChangeAdminTheme={onChangeAdminTheme} onChangeEmployeeTheme={onChangeEmployeeTheme} />}
   {activeTab === 'settings' && <SettingsView schedule={schedule} rates={rates} employees={employees} cars={cars} onRefresh={onRefresh} onGoToEmployees={() => setActiveTab('employees')} />}
-  </main></div>{showAdd && <AddCarModal employees={employees} onClose={() => setShowAdd(false)} onSaved={async () => { setShowAdd(false); await onRefresh(); }} />}{historyCar && <CarHistoryModal car={historyCar} employees={employees} rates={rates} onClose={() => setHistoryCar(null)} onRefresh={onRefresh} />}</div>;
+  </main></div>{showAdd && <AddCarModal employees={employees} vehicleMakes={vehicleMakes} vehicleModels={vehicleModels} workCatalog={workCatalog} onClose={() => setShowAdd(false)} onSaved={async () => { setShowAdd(false); await onRefresh(); }} />}{historyCar && <CarHistoryModal car={historyCar} employees={employees} rates={rates} onClose={() => setHistoryCar(null)} onRefresh={onRefresh} />}</div>;
 }
 
 // ============================================================
@@ -1044,7 +1053,7 @@ function CarsView({ cars, query, setQuery, statusFilter, setStatusFilter, priori
 // ============================================================
 // JOBS VIEW
 // ============================================================
-function JobsView({ cars, employees, rates, employeeName, onShowCar, onRefresh }: { cars: Car[]; employees: Employee[]; rates: Rates | null; employeeName: (id: string | null) => string; onShowCar: (car: Car) => void; onRefresh: () => Promise<void> }) {
+function JobsView({ cars, employees, rates, employeeName, onShowCar, onRefresh, workCatalog }: { cars: Car[]; employees: Employee[]; rates: Rates | null; employeeName: (id: string | null) => string; onShowCar: (car: Car) => void; onRefresh: () => Promise<void>; workCatalog: CatalogOption[] }) {
   const allJobs = useMemo(() => cars.flatMap((car: Car) => (car.jobs ?? []).map((job: Job) => ({ job, car }))).sort((a, b) => a.job.order_index - b.job.order_index), [cars]);
   const [jobFilter, setJobFilter] = useState<'toate' | JobStatus>('toate');
   const [detailsJob, setDetailsJob] = useState<{ job: Job; car: Car } | null>(null);
@@ -1052,20 +1061,16 @@ function JobsView({ cars, employees, rates, employeeName, onShowCar, onRefresh }
   const [query, setQuery] = useState('');
   // Căutare locală (fără query DB nou) după număr înmatriculare, VIN, denumire lucrare și angajat.
   const matchesQuery = (car: Car, job: Job): boolean => {
-    const q = query.trim().toLowerCase();
+    const q = normalizeSearch(query);
     if (!q) return true;
-    const plate = (car.license_plate ?? '').toLowerCase();
-    const vin = (car.vin ?? '').toLowerCase();
-    const title = (job.title ?? '').toLowerCase();
-    const emp = employeeName(car.assigned_employee_id).toLowerCase();
-    return plate.includes(q) || vin.includes(q) || title.includes(q) || emp.includes(q);
+    return searchIncludes(car.license_plate, q) || searchIncludes(car.vin, q) || searchIncludes(job.title, q) || searchIncludes(employeeName(car.assigned_employee_id), q);
   };
   // Sortare FINALIZATE: descrescător după momentul real al finalizării (jobs.completed_at),
   // cea mai recentă finalizată prima. Celelalte filtre păstrează ordinea existentă.
   // Căutarea respectă tab-ul activ.
   const filtered = useMemo(() => {
     const list = jobFilter === 'toate' ? allJobs : allJobs.filter(({ job }) => job.status === jobFilter);
-    const searched = query.trim() ? list.filter(({ job, car }) => matchesQuery(car, job)) : list;
+    const searched = normalizeSearch(query) ? list.filter(({ job, car }) => matchesQuery(car, job)) : list;
     if (jobFilter !== 'finalizat') return searched;
     return [...searched].sort((a, b) => {
       const ta = a.job.completed_at ? new Date(a.job.completed_at).getTime() : 0;
@@ -1085,6 +1090,10 @@ function JobsView({ cars, employees, rates, employeeName, onShowCar, onRefresh }
 function AdminJobDetailsModal({ job, car, rates, employeeName, onClose, onShowCar }: { job: Job; car: Car; rates: Rates | null; employeeName: (id: string | null) => string; onClose: () => void; onShowCar: (car: Car) => void }) {
   const normalSec = job.worked_seconds - (job.overtime_seconds ?? 0);
   const overtimeSec = job.overtime_seconds ?? 0;
+  const finalizedCost = job.status === 'finalizat' ? computeJobCost(job, car, rates) : null;
+  const vatRate = rates?.vat_rate ?? 21;
+  const vatAmount = finalizedCost ? (finalizedCost.totalCost * vatRate) / 100 : 0;
+  const totalWithVat = finalizedCost ? finalizedCost.totalCost + vatAmount : 0;
   const fmtDateTime = (ts: string | null) => ts ? new Date(ts).toLocaleString('ro-RO', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
   const Section = ({ title, children }: { title: string; children: React.ReactNode }) => <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4"><p className="mb-3 text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: 'var(--primary)' }}>{title}</p>{children}</div>;
   const Row = ({ label, value }: { label: string; value: React.ReactNode }) => <div className="flex items-baseline justify-between gap-4 py-1"><span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>{label}</span><span className="text-right text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{value}</span></div>;
@@ -1120,6 +1129,19 @@ function AdminJobDetailsModal({ job, car, rates, employeeName, onClose, onShowCa
           <Row label="overtime_seconds" value={<span className="font-mono">{overtimeSec}s</span>} />
         </Section>
       </div>
+      {finalizedCost && <Section title="Calcul cost">
+        <Row label="Tarif orar normal" value={`${finalizedCost.normalRate.toFixed(2)} lei/oră`} />
+        <Row label="Ore normale" value={formatShortDuration(finalizedCost.normalSec)} />
+        <Row label="Cost ore normale" value={`${finalizedCost.normalCost.toFixed(2)} lei`} />
+        <Row label="Tarif orar suplimentar" value={`${finalizedCost.overtimeRate.toFixed(2)} lei/oră`} />
+        <Row label="Ore suplimentare" value={formatShortDuration(finalizedCost.overtimeSec)} />
+        <Row label="Cost ore suplimentare" value={`${finalizedCost.overtimeCost.toFixed(2)} lei`} />
+        <div className="my-2 border-t" style={{ borderColor: 'var(--border)' }} />
+        <Row label="Subtotal fără TVA" value={`${finalizedCost.totalCost.toFixed(2)} lei`} />
+        <Row label="TVA" value={`${vatRate.toFixed(2)}%`} />
+        <Row label="Valoare TVA" value={`${vatAmount.toFixed(2)} lei`} />
+        <Row label="TOTAL CU TVA" value={`${totalWithVat.toFixed(2)} lei`} />
+      </Section>}
       {job.description && <Section title="Descriere lucrare"><p className="text-sm" style={{ color: 'var(--text-primary)' }}>{job.description}</p></Section>}
       {car.notes && <Section title="Observații mașină"><p className="text-sm" style={{ color: 'var(--text-primary)' }}>{car.notes}</p></Section>}
       <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--border)] pt-4">
@@ -1445,9 +1467,9 @@ function ReportsView({ cars, employees, rates, schedule, employeeName, onRefresh
   const finalizedCarsAll = cars.filter((c: Car) => getCarStatus(c.jobs ?? []) === 'finalizata');
   const [reportQuery, setReportQuery] = useState('');
   const finalizedCars = useMemo(() => finalizedCarsAll.filter((car: Car) => {
-    const query = reportQuery.trim().toLowerCase();
+    const query = normalizeSearch(reportQuery);
     if (!query) return true;
-    return [car.license_plate, car.vin, car.client_name].some((value) => (value ?? '').toLowerCase().includes(query));
+    return [car.license_plate, car.vin, car.client_name].some((value) => normalizeSearch(value).includes(query));
   }), [finalizedCarsAll, reportQuery]);
   const incasate = finalizedCars.filter((c: Car) => c.financial_status === 'incasat');
   const neincasate = finalizedCars.filter((c: Car) => c.financial_status === 'neincasat');
@@ -1461,6 +1483,8 @@ function ReportsView({ cars, employees, rates, schedule, employeeName, onRefresh
   };
   const [showGenerate, setShowGenerate] = useState(false);
   const [reportType, setReportType] = useState<'job' | 'total'>('job');
+  // TAB-uri Rapoarte: „pdf” = conținutul existent (nemodificat), „angajati” = raportul nou pe ecran.
+  const [reportsTab, setReportsTab] = useState<'pdf' | 'angajati'>('pdf');
   const [selectedJob, setSelectedJob] = useState('');
   const [selectedReportCar, setSelectedReportCar] = useState<Car | null>(null);
   // Scopes raportul DOAR pe mașina selectată din rând; când nu există, acoperă toate mașinile.
@@ -1499,6 +1523,11 @@ function ReportsView({ cars, employees, rates, schedule, employeeName, onRefresh
 </div>
 <button onClick={() => openReportModal(null)} className="flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold text-white shadow-sm" style={{ background: 'var(--button)' }}><FileBarChart size={16} /> GENEREAZĂ PDF</button>
 </div>
+<div className="flex flex-wrap gap-2">
+<button onClick={() => setReportsTab('pdf')} className="rounded-lg px-4 py-2 text-sm font-bold transition" style={reportsTab === 'pdf' ? { background: 'var(--button)', color: '#fff' } : { border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>Rapoarte PDF</button>
+<button onClick={() => setReportsTab('angajati')} className="rounded-lg px-4 py-2 text-sm font-bold transition" style={reportsTab === 'angajati' ? { background: 'var(--button)', color: '#fff' } : { border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>Rapoarte angajați</button>
+</div>
+{reportsTab === 'pdf' && (<>
 <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" size={18} /><input value={reportQuery} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReportQuery(e.target.value)} placeholder="Caută după număr, VIN sau client..." className="h-11 w-full rounded-lg border bg-[var(--surface)] pl-10 pr-4 text-sm outline-none" style={{ borderColor: SV.border }} /></div>
 <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
 {kpiCards.map((k) => <div key={k.label} className="flex items-center justify-between rounded-[14px] border p-5" style={{ borderColor: SV.border, background: k.bg }}>
@@ -1508,6 +1537,10 @@ function ReportsView({ cars, employees, rates, schedule, employeeName, onRefresh
 </div>
 <div className="overflow-hidden rounded-[16px] border bg-[var(--surface)] shadow-sm" style={{ borderColor: SV.border }}><div className="border-b px-6 py-4" style={{ borderColor: SV.border }}><h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>Mașini finalizate ({finalizedCars.length})</h3></div><div className="hidden grid-cols-[1fr_1fr_1fr_1fr_1.2fr_1fr_1.2fr_60px] gap-4 border-b bg-[var(--surface-secondary)] px-6 py-3 text-[11px] font-bold uppercase tracking-[0.12em] sm:grid" style={{ borderColor: SV.border, color: SV.muted }}><span>Client</span><span>Mașină</span><span>Nr. Înm.</span><span>Data fin.</span><span>Angajat</span><span>Timp total</span><span>Status financiar</span><span className="text-right">PDF</span></div>{finalizedCars.length === 0 ? <div className="p-8 text-center text-sm" style={{ color: SV.sec }}>Nu există mașini finalizate.</div> : finalizedCars.map((car: Car) => <div key={car.id} className="grid grid-cols-1 gap-2 border-b px-6 py-4 last:border-0 sm:grid-cols-[1fr_1fr_1fr_1fr_1.2fr_1fr_1.2fr_60px] sm:items-center sm:gap-4" style={{ borderColor: SV.border }}><span className="text-sm font-semibold" style={{ color: SV.navy }}>{car.client_name}</span><span className="text-sm" style={{ color: SV.sec }}>{car.make} {car.model}</span><span className="text-sm font-bold" style={{ color: SV.navy }}>{car.license_plate}</span><span className="text-sm" style={{ color: SV.sec }}>{car.completed_at ? new Date(car.completed_at).toLocaleDateString('ro-RO') : '—'}</span>{(() => { const n = employeeName(car.assigned_employee_id); return <span className="flex min-w-0 items-center gap-2"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold" style={{ background: SV.lav, color: SV.purple }}>{n[0]}</span><span className="truncate text-sm font-medium" style={{ color: SV.navy }}>{n}</span></span>; })()}<span className="font-mono text-sm" style={{ color: 'var(--text-secondary)' }}>{formatShortDuration(totalWorkedSeconds(car.jobs))}</span><select defaultValue={car.financial_status} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => void updateFinancial(car, e.target.value)} className={`h-9 rounded-lg border px-2 text-xs font-bold ${financialStyles[car.financial_status as FinancialStatus] ?? 'border-[var(--border)] text-[var(--text-secondary)]'}`}>{financialOptions.map((f: FinancialStatus) => <option key={f} value={f}>{financialLabels[f]}</option>)}</select><button onClick={() => openReportModal(car)} className="justify-self-end rounded-lg p-1.5 transition hover:bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]" style={{ color: SV.purple }} title="Generează PDF"><FileText size={16} /></button></div>)}</div>
 <p className="pt-2 pb-4 text-center text-xs" style={{ color: SV.muted }}>Rapoartele sunt disponibile pentru analiză și istoric.</p>
+</>)}
+{reportsTab === 'angajati' && (
+<EmployeeReportsTab employees={employees} />
+)}
 {showGenerate && <Modal title={`Generează PDF — ${selectedReportCar ? selectedReportCar.license_plate : 'all cars'}`} onClose={() => setShowGenerate(false)}>
 <div className="space-y-5 p-6">
 <p className="rounded-lg border px-3 py-2 text-xs" style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>Raport pentru: {selectedReportCar ? `${selectedReportCar.license_plate} (${selectedReportCar.make ?? ''} ${selectedReportCar.model ?? ''})` : 'toate mașinile'}</p>
@@ -1545,8 +1578,8 @@ function AppointmentsView({ appointments, cars, employees, employeeName, onRefre
 
   const filtered = useMemo(() => appointments.filter((a: Appointment) => {
     const matchesDate = !filterDate || a.appointment_date === filterDate;
-    const matchesClient = !filterClient || (a.client_name ?? '').toLowerCase().includes(filterClient.toLowerCase());
-    const matchesCar = !filterCar || (a.license_plate ?? '').toLowerCase().includes(filterCar.toLowerCase());
+    const matchesClient = !filterClient || searchIncludes(a.client_name, filterClient);
+    const matchesCar = !filterCar || searchIncludes(a.license_plate, filterCar);
     const matchesEmployee = filterEmployee === 'all' || a.employee_id === filterEmployee;
     const matchesStatus = filterStatus === 'all' || a.status === filterStatus;
     return matchesDate && matchesClient && matchesCar && matchesEmployee && matchesStatus;
@@ -1579,9 +1612,9 @@ function AddAppointmentModal({ cars, employees, onClose, onSaved }: { cars: Car[
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const matchedCar = useMemo(() => {
-    const q = form.license_plate.trim().toLowerCase();
+    const q = normalizeSearch(form.license_plate);
     if (!q) return null;
-    return cars.find((c: Car) => c.license_plate.toLowerCase() === q || (c.internal_id ?? '').toLowerCase() === q || (c.vin ?? '').toLowerCase() === q || (c.plate_history ?? []).some((p: PlateHistoryEntry) => p.license_plate.toLowerCase() === q)) ?? null;
+    return cars.find((c: Car) => normalizeSearch(c.license_plate) === q || normalizeSearch(c.internal_id) === q || normalizeSearch(c.vin) === q || (c.plate_history ?? []).some((p: PlateHistoryEntry) => normalizeSearch(p.license_plate) === q)) ?? null;
   }, [cars, form.license_plate]);
   const save = async (): Promise<void> => {
     if (!form.appointment_date || !form.appointment_time) return;
@@ -1820,19 +1853,62 @@ function EmployeeModal({ mode, employee, onClose, onSaved }: { mode: 'add' | 'ed
 // ============================================================
 // SETTINGS VIEW
 // ============================================================
+const scheduleDayFields = [
+  { key: 'monday', label: 'Luni', weekday: 1 },
+  { key: 'tuesday', label: 'Marți', weekday: 2 },
+  { key: 'wednesday', label: 'Miercuri', weekday: 3 },
+  { key: 'thursday', label: 'Joi', weekday: 4 },
+  { key: 'friday', label: 'Vineri', weekday: 5 },
+  { key: 'saturday', label: 'Sâmbătă', weekday: 6 },
+  { key: 'sunday', label: 'Duminică', weekday: 0 },
+] as const;
+type ScheduleDayName = typeof scheduleDayFields[number]['key'];
+function scheduleDaysFor(schedule: Schedule | null): Record<ScheduleDayName, ScheduleDay> {
+  const fallback = schedule ?? { work_start: '07:00', work_end: '18:00', break_start: '13:00', break_end: '14:00' } as Schedule;
+  return Object.fromEntries(scheduleDayFields.map((day) => [day.key, getScheduleDay(fallback, day.weekday)])) as Record<ScheduleDayName, ScheduleDay>;
+}
 function DemoDataManager({ employees, cars, onChanged }: { employees: Employee[]; cars: Car[]; onChanged: () => Promise<void> }) {
   const [activityCount, setActivityCount] = useState(0);
+  const [error, setError] = useState('');
   const demoEmployees = employees.filter((e: Employee) => e.is_demo);
   const demoCars = cars.filter((c: Car) => c.is_demo);
   const demoJobs = demoCars.reduce((total: number, c: Car) => total + (c.jobs?.filter((j: Job) => j.is_demo).length ?? 0), 0);
   useEffect(() => { const load = async (): Promise<void> => { const { count } = await supabase.from('activity_log').select('id', { count: 'exact', head: true }).eq('is_demo', true); setActivityCount(count ?? 0); }; void load(); }, [employees, cars]);
   const deleteAll = async (): Promise<void> => {
     if (!window.confirm('Ești sigur că vrei să ștergi toate datele DEMO? Se vor șterge angajați demo, mașini demo, lucrări demo și istoricul demo. Datele reale nu vor fi afectate.')) return;
-    await supabase.rpc('delete_all_demo_data'); await onChanged();
+    setError('');
+    const { error: rpcError } = await supabase.rpc('delete_all_demo_data');
+    if (rpcError) { setError('Datele demo nu au putut fi șterse.'); return; }
+    await onChanged();
   };
-  return <div className="mb-5 rounded-xl border border-[color-mix(in_srgb,var(--warning)_30%,transparent)] bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] p-6"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><div className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[color-mix(in_srgb,var(--warning)_18%,transparent)] text-[var(--warning)]"><Cog size={16} /></span><h3 className="font-bold text-[var(--text-primary)]">Gestionează date demo</h3></div><p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">Datele marcate DEMO pot fi șterse pentru a curăța mediul de test. Datele reale nu au buton de ștergere.</p></div><button onClick={deleteAll} disabled={demoEmployees.length === 0} className="flex shrink-0 items-center justify-center gap-2 rounded-lg border border-[color-mix(in_srgb,var(--warning)_45%,transparent)] bg-[var(--surface)] px-4 py-2.5 text-sm font-bold text-[var(--warning)] disabled:cursor-not-allowed disabled:opacity-40"><Trash2 size={16} /> ȘTERGE TOATE DATELE DEMO</button></div><div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4"><DemoCount label="Angajați demo" value={demoEmployees.length} /><DemoCount label="Mașini demo" value={demoCars.length} /><DemoCount label="Lucrări demo" value={demoJobs} /><DemoCount label="Istoric demo" value={activityCount} /></div></div>;
+  if (demoEmployees.length === 0 && demoCars.length === 0 && activityCount === 0) return null;
+  return <div className="mb-5 rounded-xl border border-[color-mix(in_srgb,var(--warning)_30%,transparent)] bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] p-6"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><div className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[color-mix(in_srgb,var(--warning)_18%,transparent)] text-[var(--warning)]"><Cog size={16} /></span><h3 className="font-bold text-[var(--text-primary)]">Gestionează date demo</h3></div><p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">Datele marcate DEMO pot fi șterse pentru a curăța mediul de test. Datele reale nu au buton de ștergere.</p></div><button onClick={() => void deleteAll()} disabled={demoEmployees.length === 0} className="flex shrink-0 items-center justify-center gap-2 rounded-lg border border-[color-mix(in_srgb,var(--warning)_45%,transparent)] bg-[var(--surface)] px-4 py-2.5 text-sm font-bold text-[var(--warning)] disabled:cursor-not-allowed disabled:opacity-40"><Trash2 size={16} /> ȘTERGE TOATE DATELE DEMO</button></div>{error && <p className="mt-3 text-sm font-semibold text-red-700">{error}</p>}<div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4"><DemoCount label="Angajați demo" value={demoEmployees.length} /><DemoCount label="Mașini demo" value={demoCars.length} /><DemoCount label="Lucrări demo" value={demoJobs} /><DemoCount label="Istoric demo" value={activityCount} /></div></div>;
 }
 function DemoCount({ label, value }: { label: string; value: number }) { return <div className="rounded-lg border border-[color-mix(in_srgb,var(--warning)_30%,transparent)] bg-[var(--surface)]/70 px-3 py-3"><p className="text-[10px] font-bold uppercase tracking-wide text-[var(--warning)]">{label}</p><p className="mt-1 text-xl font-bold text-[var(--text-primary)]">{value}</p></div>; }
+
+function OperationalReset({ onRefresh }: { onRefresh: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const close = (): void => { if (deleting) return; setOpen(false); setPassword(''); setError(''); };
+  const reset = async (): Promise<void> => {
+    if (!password.trim() || deleting) return;
+    setDeleting(true); setError('');
+    const { error: rpcError } = await supabase.rpc('reset_operational_data', { p_password: password });
+    if (rpcError) { setError('Operația nu a fost executată. Verifică parola și încearcă din nou.'); setDeleting(false); return; }
+    await onRefresh();
+    setPassword(''); setOpen(false); setDeleting(false); setMessage('Datele operaționale au fost șterse. Catalogul a fost păstrat.');
+  };
+  return <>
+    <div className="mt-10 rounded-[18px] border p-6" style={{ borderColor: 'color-mix(in srgb, var(--danger) 35%, var(--border))', background: 'color-mix(in srgb, var(--danger) 4%, var(--surface))' }}>
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><div className="flex items-center gap-2"><AlertTriangle size={18} style={{ color: 'var(--danger)' }} /><h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>Zonă periculoasă</h3></div><p className="mt-2 max-w-2xl text-sm leading-6" style={{ color: SV.sec }}>Șterge definitiv angajații, mașinile și lucrările existente. Programările și catalogul reutilizabil nu sunt șterse.</p></div><button onClick={() => { setOpen(true); setError(''); }} className="flex shrink-0 items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-bold" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}><Trash2 size={16} /> Șterge datele existente</button></div>
+      {message && <p className="mt-4 text-sm font-semibold text-emerald-600">{message}</p>}
+    </div>
+    {open && <Modal title="Confirmare ștergere definitivă" onClose={close}><div className="space-y-5 p-6"><div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">Această operație va șterge angajații, mașinile și lucrările existente. Operația este ireversibilă.</div><label className="block text-sm font-bold" style={{ color: SV.navy }}>Parolă<input type="password" value={password} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)} autoFocus className="mt-2 h-11 w-full rounded-lg border px-3 text-sm outline-none focus:border-[var(--danger)]" style={{ borderColor: SV.border }} /></label>{error && <p className="text-sm font-semibold text-red-700">{error}</p>}<div className="flex justify-end gap-3 border-t pt-5" style={{ borderColor: SV.border }}><button onClick={close} disabled={deleting} className="rounded-lg px-4 py-2.5 text-sm font-bold" style={{ color: SV.sec }}>Anulează</button><button onClick={() => void reset()} disabled={!password.trim() || deleting} className="flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" style={{ background: 'var(--danger)' }}>{deleting && <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />}{deleting ? 'Se șterge...' : 'Șterge definitiv'}</button></div></div></Modal>}
+  </>;
+}
 
 function BackupSection({ employees, cars }: { employees: Employee[]; cars: Car[] }) {
   const [msg, setMsg] = useState('');
@@ -1989,11 +2065,21 @@ function EventModesCard({ employees, onRefresh }: { employees: Employee[]; onRef
 }
 
 function SettingsView({ schedule, rates, employees, cars, onRefresh, onGoToEmployees }: { schedule: Schedule | null; rates: Rates | null; employees: Employee[]; cars: Car[]; onRefresh: () => Promise<void>; onGoToEmployees?: () => void }) {
+  const [settingsTab, setSettingsTab] = useState<'schedule' | 'automation' | 'general'>('schedule');
   const [message, setMessage] = useState('');
-  const [form, setForm] = useState({ work_start: schedule?.work_start?.slice(0, 5) ?? '07:00', break_start: schedule?.break_start?.slice(0, 5) ?? '13:00', break_end: schedule?.break_end?.slice(0, 5) ?? '14:00', work_end: schedule?.work_end?.slice(0, 5) ?? '18:00', normal_rate: rates?.normal_rate ?? 100, urgent_rate: rates?.urgent_rate ?? 150, warranty_rate: rates?.warranty_rate ?? 0, overtime_rate: rates?.overtime_rate ?? 150, vat_rate: rates?.vat_rate ?? 21 });
+  const [saveError, setSaveError] = useState('');
+  const [form, setForm] = useState({ work_start: schedule?.work_start?.slice(0, 5) ?? '07:00', break_start: schedule?.break_start?.slice(0, 5) ?? '13:00', break_end: schedule?.break_end?.slice(0, 5) ?? '14:00', work_end: schedule?.work_end?.slice(0, 5) ?? '18:00', days: scheduleDaysFor(schedule), normal_rate: rates?.normal_rate ?? 100, urgent_rate: rates?.urgent_rate ?? 150, warranty_rate: rates?.warranty_rate ?? 0, overtime_rate: rates?.overtime_rate ?? 150, vat_rate: rates?.vat_rate ?? 21 });
   const save = async (): Promise<void> => {
-    if (schedule) await supabase.from('work_schedule').update({ work_start: form.work_start, work_end: form.work_end, break_start: form.break_start, break_end: form.break_end }).eq('id', schedule.id);
-    if (rates) await supabase.from('rates').update({ normal_rate: form.normal_rate, urgent_rate: form.urgent_rate, warranty_rate: form.warranty_rate, overtime_rate: form.overtime_rate, vat_rate: form.vat_rate }).eq('id', rates.id);
+    setSaveError('');
+    if (schedule) {
+      const dayValues = Object.fromEntries(scheduleDayFields.flatMap(({ key }) => [[`${key}_active`, form.days[key].active], [`${key}_start`, form.days[key].start], [`${key}_end`, form.days[key].end]]));
+      const { error } = await supabase.from('work_schedule').update({ work_start: form.days.monday.start, work_end: form.days.monday.end, break_start: form.break_start, break_end: form.break_end, ...dayValues }).eq('id', schedule.id);
+      if (error) { setSaveError('Programul de lucru nu a putut fi salvat.'); return; }
+    }
+    if (rates) {
+      const { error } = await supabase.from('rates').update({ normal_rate: form.normal_rate, urgent_rate: form.urgent_rate, warranty_rate: form.warranty_rate, overtime_rate: form.overtime_rate, vat_rate: form.vat_rate }).eq('id', rates.id);
+      if (error) { setSaveError('Tarifele nu au putut fi salvate.'); return; }
+    }
     setMessage('Setările au fost salvate'); await onRefresh(); window.setTimeout(() => setMessage(''), 2500);
   };
   // UI-only: formularul din panoul drept — aceeași inserare ca EmployeeModal (mode 'add').
@@ -2009,7 +2095,7 @@ function SettingsView({ schedule, rates, employees, cars, onRefresh, onGoToEmplo
     setEmpSaving(false);
   };
   const empList = employees.filter((e: Employee) => e.role === 'employee').slice(0, 3);
-  const timeFields: Array<['work_start' | 'break_start' | 'break_end' | 'work_end', string]> = [['work_start', 'Început'], ['break_start', 'Pauză de la'], ['break_end', 'Pauză până la'], ['work_end', 'Sfârșit']];
+  const timeFields: Array<['break_start' | 'break_end', string]> = [['break_start', 'Pauză de la'], ['break_end', 'Pauză până la']];
   const rateTiles: Array<{ key: 'normal_rate' | 'urgent_rate' | 'warranty_rate' | 'overtime_rate'; label: string; bg: string; dot: string; Icon: React.ElementType }> = [
     { key: 'normal_rate', label: 'Normal', bg: 'color-mix(in srgb, var(--success) 10%, transparent)', dot: 'var(--success)', Icon: DollarSign },
     { key: 'urgent_rate', label: 'Urgent', bg: 'color-mix(in srgb, var(--warning) 10%, transparent)', dot: 'var(--warning)', Icon: Zap },
@@ -2024,16 +2110,30 @@ function SettingsView({ schedule, rates, employees, cars, onRefresh, onGoToEmplo
 <h1 className="mt-2 text-[32px] font-bold leading-tight" style={{ color: SV.navy }}>Setări</h1>
 <p className="mt-2 text-sm" style={{ color: SV.sec }}>Configurează programul de lucru, tarifele și preferințele aplicației.</p>
 </div>
-<DemoDataManager employees={employees} cars={cars} onChanged={onRefresh} />
-<div className="rounded-[18px] border bg-[var(--surface)] p-6" style={{ borderColor: SV.border }}>
+<div className="flex flex-wrap gap-2 border-b pb-3" style={{ borderColor: SV.border }}>
+{([['schedule', 'Program de lucru'], ['automation', 'Automatizare evenimente'], ['general', 'Restul setărilor']] as const).map(([key, label]) => <button key={key} onClick={() => setSettingsTab(key)} className="rounded-lg px-4 py-2.5 text-sm font-bold transition" style={{ background: settingsTab === key ? SV.purple : 'transparent', color: settingsTab === key ? '#fff' : SV.sec }}>{label}</button>)}
+</div>
+<div className={settingsTab === 'general' ? '' : 'hidden'}><DemoDataManager employees={employees} cars={cars} onChanged={onRefresh} /></div>
+<div className={`rounded-[18px] border bg-[var(--surface)] p-6 ${settingsTab !== 'schedule' ? 'hidden' : ''}`} style={{ borderColor: SV.border }}>
 <div className="flex items-start gap-3">
 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ background: SV.lav, color: SV.purple }}><Calendar size={18} /></span>
 <div><h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>Program de lucru</h3><p className="mt-0.5 text-sm" style={{ color: SV.sec }}>Pauza este automată și nu intră în timpul lucrat.</p></div>
+</div>
+<div className="mt-5 space-y-3">
+{scheduleDayFields.map(({ key, label }) => <div key={key} className="grid items-center gap-3 rounded-lg border p-3 sm:grid-cols-[1fr_auto_1fr_1fr]" style={{ borderColor: SV.border, opacity: form.days[key].active ? 1 : 0.62 }}>
+<span className="text-sm font-bold" style={{ color: SV.navy }}>{label}</span>
+<label className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide" style={{ color: SV.muted }}><input type="checkbox" checked={form.days[key].active} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, days: { ...form.days, [key]: { ...form.days[key], active: e.target.checked } } })} /> Activ</label>
+<label className="text-xs font-semibold" style={{ color: SV.muted }}>Început<input type="time" value={form.days[key].start} disabled={!form.days[key].active} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, days: { ...form.days, [key]: { ...form.days[key], start: e.target.value } } })} className="mt-1 h-10 w-full rounded-lg border bg-[var(--surface)] px-2 text-sm font-semibold disabled:cursor-not-allowed" style={{ borderColor: SV.border, color: SV.navy }} /></label>
+<label className="text-xs font-semibold" style={{ color: SV.muted }}>Sfârșit<input type="time" value={form.days[key].end} disabled={!form.days[key].active} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, days: { ...form.days, [key]: { ...form.days[key], end: e.target.value } } })} className="mt-1 h-10 w-full rounded-lg border bg-[var(--surface)] px-2 text-sm font-semibold disabled:cursor-not-allowed" style={{ borderColor: SV.border, color: SV.navy }} /></label>
+</div>)}
 </div>
 <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
 {timeFields.map(([key, label]) => <label key={key} className="block text-[13px] font-semibold" style={{ color: SV.muted }}>{label}<span className="relative mt-2 block"><input type="time" value={form[key]} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [key]: e.target.value })} className="h-[50px] w-full rounded-[10px] border bg-[var(--surface)] px-3 pr-9 text-[15px] font-semibold outline-none focus:border-[var(--primary)]" style={{ borderColor: SV.border, color: SV.navy }} /><Clock size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2" style={{ color: SV.muted }} /></span></label>)}
 </div>
 </div>
+<div className="flex justify-center"><button onClick={() => void save()} className="flex h-[44px] items-center justify-center gap-2 rounded-lg px-6 text-sm font-bold text-white transition hover:brightness-110" style={{ background: SV.purple }}><Check size={16} /> Salvează programul</button></div>
+<div className={settingsTab === 'automation' ? '' : 'hidden'}><EventModesCard employees={employees} onRefresh={onRefresh} /></div>
+<div className={settingsTab === 'general' ? '' : 'hidden'}>
 <div className="rounded-[18px] border bg-[var(--surface)] p-6" style={{ borderColor: SV.border }}>
 <div className="flex items-start gap-3">
 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ background: 'color-mix(in srgb, var(--info) 14%, transparent)', color: 'var(--info)' }}><Percent size={18} /></span>
@@ -2062,15 +2162,17 @@ function SettingsView({ schedule, rates, employees, cars, onRefresh, onGoToEmplo
 </div>)}
 </div>
 </div>
-<EventModesCard employees={employees} onRefresh={onRefresh} />
 <BackupSection employees={employees} cars={cars} />
 <div className="flex flex-col items-center gap-2 py-2">
 <button onClick={save} className="flex h-[44px] w-[250px] items-center justify-center gap-2 rounded-lg text-sm font-bold text-white transition hover:brightness-110" style={{ background: SV.purple }}><Check size={16} /> Salvează setările</button>
 {message && <span className="text-sm font-semibold text-emerald-600">{message}</span>}
+{saveError && <span className="text-sm font-semibold text-red-700">{saveError}</span>}
 <p className="text-xs" style={{ color: SV.muted }}>Modificările vor fi aplicate imediat.</p>
 </div>
+<OperationalReset onRefresh={onRefresh} />
 </div>
-<aside className="w-full shrink-0 xl:w-[360px]">
+</div>
+<aside className={`w-full shrink-0 xl:w-[360px] ${settingsTab === 'general' ? '' : 'hidden'}`}>
 <div className="rounded-[18px] border bg-[var(--surface)] p-6" style={{ borderColor: SV.border }}>
 <div className="flex items-start gap-3">
 <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full" style={{ background: SV.lav, color: SV.purple }}><UserPlus size={19} /></span>
@@ -2229,8 +2331,15 @@ function CarHistoryModal({ car, employees, rates, onClose, onRefresh }: { car: C
 // ============================================================
 // ADD CAR MODAL
 // ============================================================
-function AddCarModal({ employees, onClose, onSaved }: { employees: Employee[]; onClose: () => void; onSaved: () => Promise<void> }) {
+function AddCarModal({ employees, vehicleMakes = [], vehicleModels = [], workCatalog = [], onClose, onSaved }: { employees: Employee[]; vehicleMakes?: CatalogOption[]; vehicleModels?: CatalogOption[]; workCatalog?: CatalogOption[]; onClose: () => void; onSaved: () => Promise<void> }) {
   const [form, setForm] = useState({ license_plate: '', client_name: '', client_phone: '', make: '', model: '', deadline: '', priority: 'normala', assigned_employee_id: '', notes: '', is_warranty: false, vin: '', mileage: '', body_observations: '', fuel_level: '', photo_url: '', jobs: ['Revizie generală'] });
+  const selectedMake = vehicleMakes.find((make) => normalizeSearch(make.name) === normalizeSearch(form.make));
+  const modelOptions = vehicleModels.filter((model) => !form.make || model.make_id === selectedMake?.id);
+  catalogFieldOptions = {
+    makes: vehicleMakes.length > 0 ? vehicleMakes : VEHICLE_MAKES.map((name) => ({ id: name, name, normalized_name: normalizeSearch(name) })),
+    models: modelOptions.length > 0 ? modelOptions : modelsFor(form.make).map((name) => ({ id: name, name, normalized_name: normalizeSearch(name) })),
+    works: workCatalog,
+  };
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const update = (key: string, value: string | boolean): void => setForm({ ...form, [key]: value });
@@ -2258,6 +2367,14 @@ function AddCarModal({ employees, onClose, onSaved }: { employees: Employee[]; o
     if (!form.license_plate || !form.client_name) return;
     if (!form.mileage) { setError('Kilometrajul este obligatoriu.'); return; }
     setSaving(true); setError('');
+    const makeName = form.make.trim();
+    let makeId: string | null = null;
+    if (makeName) {
+      const makeRes = await supabase.from('vehicle_makes').upsert({ name: makeName, normalized_name: normalizeSearch(makeName) }, { onConflict: 'normalized_name' }).select('id').maybeSingle();
+      makeId = makeRes.data?.id ?? null;
+    }
+    if (makeId && form.model.trim()) await supabase.from('vehicle_models').upsert({ make_id: makeId, name: form.model.trim(), normalized_name: normalizeSearch(form.model) }, { onConflict: 'make_id,normalized_name' });
+    for (const title of form.jobs.map((job) => job.trim()).filter(Boolean)) await supabase.from('work_catalog').upsert({ name: title, normalized_name: normalizeSearch(title) }, { onConflict: 'normalized_name' });
     const { data: car, error: err } = await supabase.from('cars').insert({ license_plate: form.license_plate.toUpperCase(), client_name: form.client_name, client_phone: form.client_phone || null, make: form.make || null, model: form.model || null, deadline: form.deadline || null, priority: form.priority, assigned_employee_id: form.assigned_employee_id || null, notes: form.notes || null, is_warranty: form.is_warranty, vin: form.vin || null, mileage: Number(form.mileage) || null, body_observations: form.body_observations || null, fuel_level: form.fuel_level || null, photo_url: form.photo_url || null }).select().maybeSingle();
     if (err) { setError(err.message); setSaving(false); return; }
     if (!err && car) {
@@ -2269,7 +2386,11 @@ function AddCarModal({ employees, onClose, onSaved }: { employees: Employee[]; o
   };
   return <Modal title="Adaugă mașină" onClose={onClose}><div className="space-y-5 p-6"><div className="grid gap-4 sm:grid-cols-2"><Field label="Număr înmatriculare" value={form.license_plate} onChange={(v: string) => update('license_plate', v)} placeholder="TM 27 FXC" /><Field label="Nume client" value={form.client_name} onChange={(v: string) => update('client_name', v)} placeholder="Ion Popescu" /><Field label="Telefon" value={form.client_phone} onChange={(v: string) => update('client_phone', v)} placeholder="0740 000 000" /><Field label="Termen" value={form.deadline} onChange={(v: string) => update('deadline', v)} type="date" /><Field label="Marcă" value={form.make} onChange={(v: string) => update('make', v)} placeholder="Mercedes" list="servix-makes" /><Field label="Model" value={form.model} onChange={(v: string) => update('model', v)} placeholder="Clasa C" list="servix-models" /><Field label="Serie șasiu / VIN (opțional)" value={form.vin} onChange={(v: string) => update('vin', v)} placeholder="WVWZZZ..." /><Field label="Kilometraj (obligatoriu)" value={form.mileage} onChange={(v: string) => update('mileage', v)} type="number" placeholder="150000" /><label className="text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Nivel carburant (opțional)<select value={form.fuel_level} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => update('fuel_level', e.target.value)} className="mt-2 h-11 w-full rounded-lg border border-[var(--border)] px-3 text-sm font-semibold text-[var(--text-primary)]"><option value="">—</option>{fuelOptions.map((f: FuelLevel) => <option key={f} value={f}>{fuelLabels[f]}</option>)}</select></label><label className="text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Prioritate<select value={form.priority} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => update('priority', e.target.value)} className="mt-2 h-11 w-full rounded-lg border border-[var(--border)] px-3 text-sm font-semibold text-[var(--text-primary)]"><option value="normala">Normală</option><option value="urgenta">Urgentă</option></select></label><label className="text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Responsabil<select value={form.assigned_employee_id} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => update('assigned_employee_id', e.target.value)} className="mt-2 h-11 w-full rounded-lg border border-[var(--border)] px-3 text-sm font-semibold text-[var(--text-primary)]"><option value="">Nealocat</option>{employees.filter((e: Employee) => e.role === 'employee').map((e: Employee) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></label><Field label="URL poză mașină (opțional)" value={form.photo_url} onChange={(v: string) => update('photo_url', v)} placeholder="https://..." /><div><label className="text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Fotografie mașină</label><div className="mt-2 flex items-center gap-3">{form.photo_url ? <img src={form.photo_url} alt="Mașină" className="h-16 w-24 flex-none rounded-lg object-cover" /> : <div className="flex h-16 w-24 flex-none items-center justify-center rounded-lg" style={{ background: 'color-mix(in srgb, var(--primary) 12%, transparent)' }}><CarFront size={26} style={{ color: 'var(--secondary)' }} /></div>}<button onClick={() => carPhotoInputRef.current?.click()} disabled={photoUploading} className="flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-bold text-[var(--secondary)] transition hover:bg-[var(--card)] disabled:opacity-50"><Image size={14} /> {photoUploading ? 'Se încarcă...' : '+ Adaugă fotografie'}</button>{form.photo_url && <button onClick={() => update('photo_url', '')} className="text-xs font-bold text-red-500">Elimină</button>}</div>{photoErr && <p className="mt-1 text-xs font-semibold text-red-500">{photoErr}</p>}<input ref={carPhotoInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e: React.ChangeEvent<HTMLInputElement>) => void handleCarPhoto(e)} /></div></div><label className="block text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Observații caroserie (opțional)<textarea value={form.body_observations} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => update('body_observations', e.target.value)} rows={2} className="mt-2 w-full rounded-lg border border-[var(--border)] px-3 py-2 text-sm outline-none focus:border-[var(--primary)]" placeholder="Zgârietură portieră stânga, etc." /></label><label className="flex items-center gap-2 text-sm font-semibold text-[var(--text-secondary)]"><input type="checkbox" checked={form.is_warranty} onChange={(e: React.ChangeEvent<HTMLInputElement>) => update('is_warranty', e.target.checked)} /> În garanție (tarif 0 lei/oră)</label><label className="block text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Note<textarea value={form.notes} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => update('notes', e.target.value)} rows={3} className="mt-2 w-full rounded-lg border border-[var(--border)] px-3 py-2 text-sm outline-none focus:border-[var(--primary)]" placeholder="Informații relevante..." /></label><div><div className="mb-2 flex items-center justify-between"><label className="text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Lucrări necesare</label><button onClick={() => setForm({ ...form, jobs: [...form.jobs, ''] })} className="text-xs font-bold text-[var(--primary)]">+ Adaugă lucrare</button></div><div className="space-y-2">{form.jobs.map((j: string, i: number) => <input key={i} value={j} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { const jobs = [...form.jobs]; jobs[i] = e.target.value; setForm({ ...form, jobs }); }} className="h-11 w-full rounded-lg border border-[var(--border)] px-3 text-sm outline-none focus:border-[var(--primary)]" placeholder={`Lucrarea ${i + 1}`} />)}</div></div>{error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{error}</div>}<datalist id="servix-makes">{VEHICLE_MAKES.map((m: string) => <option key={m} value={m} />)}</datalist><datalist id="servix-models">{modelsFor(form.make).map((m: string) => <option key={m} value={m} />)}</datalist><div className="flex justify-end gap-3 border-t border-[var(--border)] pt-5"><button onClick={onClose} className="rounded-lg px-4 py-2.5 text-sm font-bold text-[var(--text-secondary)] hover:bg-[var(--border)]">Anulează</button><button onClick={save} disabled={saving || !form.license_plate || !form.client_name || !form.mileage} className="rounded-lg px-5 py-2.5 text-sm font-bold text-white transition disabled:bg-[var(--border)] disabled:text-[var(--text-secondary)]" style={{ background: 'var(--button)' }}>{saving ? 'Se salvează...' : 'Salvează mașina'}</button></div></div></Modal>;
 }
-function Field({ label, value, onChange, placeholder, type = 'text', list }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; type?: string; list?: string }) { return <label className="text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">{label}<input type={type} value={value} list={list} onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)} placeholder={placeholder} className="mt-2 h-11 w-full rounded-lg border border-[var(--border)] px-3 text-sm font-medium text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)] focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--accent)]" /></label>; }
+function Field({ label, value, onChange, placeholder, type = 'text', list }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; type?: string; list?: string }) {
+  if (list === 'servix-makes') return <CatalogAutocomplete label={label} value={value} options={catalogFieldOptions.makes} onChange={onChange} placeholder={placeholder} />;
+  if (list === 'servix-models') return <CatalogAutocomplete label={label} value={value} options={catalogFieldOptions.models} onChange={onChange} placeholder={placeholder} disabled={!catalogFieldOptions.models.length} />;
+  return <label className="text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">{label}<input type={type} value={value} onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)} placeholder={placeholder} className="mt-2 h-11 w-full rounded-lg border border-[var(--border)] px-3 text-sm font-medium text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)] focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--accent)]" /></label>;
+}
 
 // ============================================================
 // APP
@@ -2294,6 +2415,9 @@ export default function App() {
   const changeAdminTheme = (m: 'light' | 'dark'): void => { setAdminTheme(m); localStorage.setItem('servix_theme_admin', m); };
   const changeEmployeeTheme = (m: 'light' | 'dark'): void => { setEmployeeTheme(m); localStorage.setItem('servix_theme_employee', m); };
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [vehicleMakes, setVehicleMakes] = useState<CatalogOption[]>([]);
+  const [vehicleModels, setVehicleModels] = useState<CatalogOption[]>([]);
+  const [workCatalog, setWorkCatalog] = useState<CatalogOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const initialSession = typeof window !== 'undefined' ? localStorage.getItem('servix_session') : null;
@@ -2301,13 +2425,16 @@ export default function App() {
 
   const loadData = async (): Promise<void> => {
     setLoadError('');
-    const [empRes, carRes, schedRes, ratesRes, themeRes, apptRes] = await Promise.all([
+    const [empRes, carRes, schedRes, ratesRes, themeRes, apptRes, makesRes, modelsRes, workRes] = await Promise.all([
       supabase.from('employees').select('*').order('name'),
       supabase.from('cars').select('*, jobs(*), plate_history(*), mileage_log(*), car_photos(*)').order('created_at', { ascending: false }),
       supabase.from('work_schedule').select('*').eq('active', true).limit(1).maybeSingle(),
       supabase.from('rates').select('*').eq('active', true).limit(1).maybeSingle(),
       supabase.from('themes').select('*').order('name'),
       supabase.from('appointments').select('*').order('appointment_date', { ascending: true }).order('appointment_time', { ascending: true }),
+      supabase.from('vehicle_makes').select('id, name, normalized_name').order('name'),
+      supabase.from('vehicle_models').select('id, make_id, name, normalized_name').order('name'),
+      supabase.from('work_catalog').select('id, name, normalized_name').order('name'),
     ]);
     // Surface Supabase errors instead of silently rendering empty data
     const firstError = empRes.error ?? carRes.error ?? schedRes.error ?? ratesRes.error ?? themeRes.error ?? apptRes.error;
@@ -2322,6 +2449,9 @@ export default function App() {
     setRates(ratesRes.data as Rates | null);
     setThemes((themeRes.data ?? []) as Theme[]);
     setAppointments((apptRes.data ?? []) as Appointment[]);
+    setVehicleMakes(makesRes.error ? [] : (makesRes.data ?? []) as CatalogOption[]);
+    setVehicleModels(modelsRes.error ? [] : (modelsRes.data ?? []) as CatalogOption[]);
+    setWorkCatalog(workRes.error ? [] : (workRes.data ?? []) as CatalogOption[]);
     setLoading(false);
   };
 
@@ -2417,7 +2547,7 @@ export default function App() {
       }} />
     : view === 'employee' && employee
       ? <PanouAngajat employee={employee} cars={cars} schedule={schedule} onRefresh={loadData} onChange={() => { localStorage.removeItem('servix_session'); setEmployee(null); setView('home'); if (typeof window !== 'undefined') { window.history.pushState({}, '', '/'); } }} />
-      : <AdminPanel employees={employees} cars={cars} appointments={appointments} schedule={schedule} rates={rates} themes={themes} onRefresh={loadData} adminTheme={adminTheme} employeeTheme={employeeTheme} onChangeAdminTheme={changeAdminTheme} onChangeEmployeeTheme={changeEmployeeTheme} onExit={() => {
+      : <AdminPanel employees={employees} cars={cars} appointments={appointments} schedule={schedule} rates={rates} themes={themes} vehicleMakes={vehicleMakes} vehicleModels={vehicleModels} workCatalog={workCatalog} onRefresh={loadData} adminTheme={adminTheme} employeeTheme={employeeTheme} onChangeAdminTheme={changeAdminTheme} onChangeEmployeeTheme={changeEmployeeTheme} onExit={() => {
         localStorage.removeItem('servix_session');
         setView('home');
         if (typeof window !== 'undefined') {
