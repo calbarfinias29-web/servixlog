@@ -34,6 +34,7 @@
 body { margin: 0; min-width: 320px; min-height: 100vh; }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
+input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 1; }
 h1, h2, h3, h4 { font-family: 'Inter', sans-serif; line-height: 1.2; }
 * { box-sizing: border-box; }
 
