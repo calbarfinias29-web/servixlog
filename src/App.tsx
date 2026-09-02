@@ -768,10 +768,10 @@ function AdminPanel({ employees, cars, appointments, schedule, rates, themes, on
   ];
 
   return <div className="min-h-screen" style={{ background: 'var(--background)' }}><aside className="fixed inset-y-0 left-0 hidden w-64 border-r lg:block" style={{ background: 'var(--sidebar)', borderColor: 'var(--border)' }}><div className="flex h-full flex-col"><div className="flex h-20 items-center gap-3 border-b px-6" style={{ borderColor: 'var(--border)' }}><div className="flex h-9 w-9 items-center justify-center rounded-lg text-white" style={{ background: 'var(--primary)' }}><Wrench size={18} /></div><div><div className="font-extrabold tracking-tight" style={{ color: 'var(--text-primary)' }}>SERVIX</div><div className="text-[10px] uppercase tracking-[0.17em]" style={{ color: 'var(--text-secondary)' }}>Service Auto</div></div></div><nav className="flex-1 space-y-1 p-4">{navItems.map(([key, label, Icon]) => <button key={key} onClick={() => setActiveTab(key)} className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold transition" style={activeTab === key ? { background: 'color-mix(in srgb, var(--primary) 12%, transparent)', color: 'var(--primary)' } : { color: 'var(--text-secondary)' }}>{createElement(Icon, { size: 18 })}{label}</button>)}</nav><div className="border-t p-4" style={{ borderColor: 'var(--border)' }}><button onClick={onExit} className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold transition" style={{ color: 'var(--text-secondary)' }}><LogOut size={18} /> Ieșire</button><div className="mt-3 rounded-xl border p-4" style={{ borderColor: 'var(--border)', background: 'var(--card)' }}><div className="flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg" style={{ background: 'color-mix(in srgb, var(--primary) 12%, transparent)', color: 'var(--primary)' }}><ShieldCheck size={15} /></span><span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Control sigur</span></div><p className="mt-2 text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>Datele tale sunt protejate cu cele mai bune practici.</p></div></div></div></aside><div className="lg:pl-64"><header className="sticky top-0 z-20 flex h-20 items-center justify-between border-b px-5 backdrop-blur sm:px-8" style={{ borderColor: 'var(--border)', background: 'color-mix(in srgb, var(--surface) 95%, transparent)' }}><div><p className="text-[11px] font-bold uppercase tracking-[0.2em]" style={{ color: 'var(--primary)' }}>Control service</p><h1 className="mt-1 text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{navItems.find(([k]) => k === activeTab)?.[1] ?? 'Dashboard'}</h1></div><div className="flex items-center gap-2"><button className="relative rounded-lg p-2.5" style={{ color: 'var(--text-secondary)' }}><Bell size={19} /><span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-orange-500" /></button><div className="hidden h-8 w-px sm:block" style={{ background: 'var(--border)' }} /><div className="hidden items-center gap-2 sm:flex"><span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Administrator</span><span className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: 'var(--text-primary)' }}>A</span></div></div></header><main className="mx-auto max-w-[1400px] px-5 py-7 sm:px-8">
-  {activeTab === 'dashboard' && <DashboardView employees={employees} cars={cars} appointments={appointments} onAddCar={() => setShowAdd(true)} onGoToCars={() => setActiveTab('cars')} onGoToAppointments={() => setActiveTab('appointments')} onGoToEmployees={() => setActiveTab('employees')} onGoToReports={() => setActiveTab('reports')} />}
+  {activeTab === 'dashboard' && <DashboardView employees={employees} cars={cars} appointments={appointments} rates={rates} schedule={schedule} employeeName={employeeName} onRefresh={onRefresh} onShowCar={setHistoryCar} onAddCar={() => setShowAdd(true)} onGoToCars={() => setActiveTab('cars')} onGoToAppointments={() => setActiveTab('appointments')} onGoToEmployees={() => setActiveTab('employees')} onGoToReports={() => setActiveTab('reports')} />}
   {activeTab === 'employees' && <EmployeesView employees={employees} cars={cars} onRefresh={onRefresh} />}
   {activeTab === 'cars' && <CarsView cars={filteredCars} query={query} setQuery={setQuery} statusFilter={statusFilter} setStatusFilter={setStatusFilter} priorityFilter={priorityFilter} setPriorityFilter={setPriorityFilter} selectedEmployee={selectedEmployee} setSelectedEmployee={setSelectedEmployee} demoFilter={demoFilter} setDemoFilter={setDemoFilter} financialFilter={financialFilter} setFinancialFilter={setFinancialFilter} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} employees={employees} employeeName={employeeName} onShowCar={setHistoryCar} onAddCar={() => setShowAdd(true)} />}
-  {activeTab === 'jobs' && <JobsView cars={cars} employees={employees} employeeName={employeeName} onShowCar={setHistoryCar} />}
+  {activeTab === 'jobs' && <JobsView cars={cars} employees={employees} rates={rates} employeeName={employeeName} onShowCar={setHistoryCar} onRefresh={onRefresh} />}
   {activeTab === 'reports' && <ReportsView cars={cars} employees={employees} rates={rates} schedule={schedule} employeeName={employeeName} onRefresh={onRefresh} />}
   {activeTab === 'appointments' && <AppointmentsView appointments={appointments} cars={cars} employees={employees} employeeName={employeeName} onRefresh={onRefresh} />}
   {activeTab === 'themes' && <ThemesView themes={themes} onRefresh={onRefresh} adminTheme={adminTheme} employeeTheme={employeeTheme} onChangeAdminTheme={onChangeAdminTheme} onChangeEmployeeTheme={onChangeEmployeeTheme} />}
@@ -782,8 +782,46 @@ function AdminPanel({ employees, cars, appointments, schedule, rates, themes, on
 // ============================================================
 // DASHBOARD VIEW
 // ============================================================
-function DashboardView({ employees, cars, appointments, onAddCar, onGoToCars, onGoToAppointments, onGoToEmployees, onGoToReports }: {
-  employees: Employee[]; cars: Car[]; appointments: Appointment[];
+function LiveMonitorSection({ cars, employees, schedule, employeeName, onRefresh, onDetails, onChangeAllocation }: {
+  cars: Car[]; employees: Employee[]; schedule: Schedule | null; employeeName: (id: string | null) => string; onRefresh: () => Promise<void>;
+  onDetails: (job: Job, car: Car) => void; onChangeAllocation: (job: Job, car: Car) => void;
+}) {
+  const [now, setNow] = useState(Date.now());
+  const [expandedCarId, setExpandedCarId] = useState<string | null>(null);
+  useEffect(() => { const id = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(id); }, []);
+  useEffect(() => { const id = window.setInterval(() => { void onRefresh(); }, 10000); return () => window.clearInterval(id); }, [onRefresh]);
+  const jobLiveTimes = (job: Job): { normal: number; overtime: number } => {
+    const storedNormal = job.worked_seconds ?? 0;
+    const storedOvertime = job.overtime_seconds ?? 0;
+    if (job.status !== 'in_lucru' || !job.started_at) return { normal: storedNormal, overtime: storedOvertime };
+    const runStartMs = new Date(job.started_at).getTime();
+    const liveNormal = overlapSeconds(schedule, runStartMs, now, 'normal');
+    const liveOvertime = job.is_overtime ? overlapSeconds(schedule, runStartMs, now, 'ot') : 0;
+    return { normal: storedNormal + liveNormal, overtime: storedOvertime + liveOvertime };
+  };
+  const activeEntries = cars.flatMap((car: Car) => (car.jobs ?? []).filter((job: Job) => job.status === 'in_lucru').map((job: Job) => {
+    const times = jobLiveTimes(job);
+    return { car, job, emp: employeeName(car.assigned_employee_id), startedAt: job.started_at, normalSec: times.normal, overtimeSec: times.overtime, totalSec: times.normal };
+  })).sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''));
+  const employeesList = employees.filter((employee: Employee) => employee.role === 'employee');
+  const activeByEmployee = employeesList.map((employee: Employee) => ({ employee, entries: activeEntries.filter((entry) => entry.car.assigned_employee_id === employee.id) }));
+  return <div className="rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}>
+    <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>Mașini — ÎN LUCRU ({activeEntries.length})</h3><p className="mt-1 text-xs" style={{ color: SV.muted }}>Monitorizare în timp real — timerul crește automat, fără refresh.</p></div><span className="rounded-lg px-2.5 py-1 text-xs font-bold" style={{ background: SV.lav, color: SV.purple }}>LIVE</span></div>
+    {activeEntries.length === 0 ? <p className="mt-4 py-4 text-center text-sm" style={{ color: SV.sec }}>Nu există lucrări active în acest moment.</p> : <div className="mt-4 space-y-3">{activeEntries.map((entry) => <div key={entry.job.id}>
+      <div className="grid grid-cols-1 gap-3 rounded-xl border p-3.5 text-left transition sm:grid-cols-[1fr_auto] sm:items-center" style={{ borderColor: expandedCarId === entry.car.id ? SV.purple : SV.border, background: expandedCarId === entry.car.id ? 'color-mix(in srgb, var(--primary) 6%, transparent)' : 'transparent' }}>
+        <button onClick={() => setExpandedCarId(expandedCarId === entry.car.id ? null : entry.car.id)} className="flex min-w-0 items-center gap-3 text-left"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold" style={{ background: SV.lav, color: SV.purple }}>{(entry.car.client_name || '?')[0]}</span><span className="min-w-0"><span className="block truncate text-sm font-bold" style={{ color: SV.navy }}>{entry.car.license_plate} — {entry.car.make} {entry.car.model}</span><span className="block truncate text-xs" style={{ color: SV.sec }}>Client: {entry.car.client_name}</span><span className="mt-0.5 block truncate text-xs" style={{ color: SV.sec }}>{entry.emp} • {entry.job.title}</span></span></button>
+        <div className="flex items-center justify-between gap-3 sm:justify-end"><span className="font-mono text-sm font-bold" style={{ color: SV.purple }}>⏱ {fmtHMS(entry.totalSec)}</span><Badge value="in_lucru" compact /><button onClick={() => onDetails(entry.job, entry.car)} className="rounded-lg border px-3 py-1.5 text-xs font-bold transition hover:bg-[var(--surface-secondary)]" style={{ borderColor: SV.border, color: SV.purple }}>Detalii</button><button title="Schimbă alocatul" aria-label="Schimbă alocatul" onClick={() => onChangeAllocation(entry.job, entry.car)} className="rounded-lg p-1.5 text-[var(--text-secondary)] transition hover:bg-[var(--border)] hover:text-[var(--text-primary)]"><UserRound size={15} /></button></div>
+      </div>
+      {expandedCarId === entry.car.id && <div className="mt-2 rounded-xl border p-4" style={{ borderColor: SV.border, background: 'var(--surface-secondary)' }}><div className="grid gap-2 text-xs" style={{ color: SV.sec }}>
+        <p><span className="font-bold" style={{ color: SV.navy }}>Mașină:</span> {entry.car.make} {entry.car.model} ({entry.car.license_plate})</p><p><span className="font-bold" style={{ color: SV.navy }}>Client:</span> {entry.car.client_name}</p><p><span className="font-bold" style={{ color: SV.navy }}>Lucrare:</span> {entry.job.title}</p><p><span className="font-bold" style={{ color: SV.navy }}>Angajat:</span> {entry.emp}</p><p><span className="font-bold" style={{ color: SV.navy }}>Ora pornirii:</span> {entry.startedAt ? new Date(entry.startedAt).toLocaleString('ro-RO') : '—'}</p><p><span className="font-bold" style={{ color: SV.navy }}>Timp normal:</span> <span className="font-mono">{fmtHMS(entry.normalSec)}</span></p><p><span className="font-bold" style={{ color: SV.navy }}>Timp peste program:</span> <span className="font-mono">{fmtHMS(entry.overtimeSec)}</span></p><p><span className="font-bold" style={{ color: SV.navy }}>Timp total live:</span> <span className="font-mono">{fmtHMS(entry.totalSec)}</span></p><p><span className="font-bold" style={{ color: SV.navy }}>Status:</span> ÎN LUCRU</p>
+      </div><button onClick={() => onChangeAllocation(entry.job, entry.car)} className="mt-3 rounded-lg px-3 py-1.5 text-xs font-bold text-white" style={{ background: 'var(--button)' }}>Schimbă angajatul</button></div>}
+    </div>)}</div>}
+    <div className="mt-5 border-t pt-4" style={{ borderColor: SV.border }}><h4 className="text-xs font-bold uppercase tracking-[0.12em]" style={{ color: SV.muted }}>Situația angajaților</h4><div className="mt-3 space-y-2">{activeByEmployee.map(({ employee, entries }) => <div key={employee.id} className="flex items-center justify-between rounded-lg border px-3 py-2" style={{ borderColor: SV.border }}><span className="flex min-w-0 items-center gap-2"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold" style={{ background: SV.lav, color: SV.purple }}>{employee.name[0]}</span><span className="truncate text-xs font-semibold" style={{ color: SV.navy }}>{employee.name}</span></span>{entries.length === 0 ? <span className="text-xs font-semibold" style={{ color: 'var(--success)' }}>Liber</span> : <span className="flex min-w-0 flex-col items-end">{entries.map((entry) => <span key={entry.job.id} className="truncate text-[11px]" style={{ color: SV.sec }}>{entry.car.license_plate} • {entry.job.title} • <span className="font-mono">{fmtHMS(entry.totalSec)}</span></span>)}</span>}</div>)}</div></div>
+  </div>;
+}
+
+function DashboardView({ employees, cars, appointments, rates, schedule, employeeName, onRefresh, onShowCar, onAddCar, onGoToCars, onGoToAppointments, onGoToEmployees, onGoToReports }: {
+  employees: Employee[]; cars: Car[]; appointments: Appointment[]; rates: Rates | null; schedule: Schedule | null; employeeName: (id: string | null) => string; onRefresh: () => Promise<void>; onShowCar: (car: Car) => void;
   onAddCar: () => void; onGoToCars: () => void;
   onGoToAppointments: () => void; onGoToEmployees: () => void; onGoToReports: () => void;
 }) {
@@ -793,6 +831,8 @@ function DashboardView({ employees, cars, appointments, onAddCar, onGoToCars, on
   const [draftTo, setDraftTo] = useState('');
   const [applied, setApplied] = useState<{ employee: string; from: string; to: string }>({ employee: 'all', from: '', to: '' });
   const [activeStatus, setActiveStatus] = useState<'intarziata' | 'piese' | 'finalizata' | 'in_lucru' | null>(null);
+  const [dashDetails, setDashDetails] = useState<{ job: Job; car: Car } | null>(null);
+  const [dashChangeAlloc, setDashChangeAlloc] = useState<{ job: Job; car: Car } | null>(null);
   const useToday = !applied.from && !applied.to;
   const nowD = new Date();
   const todayStr = nowD.getFullYear() + '-' + String(nowD.getMonth() + 1).padStart(2, '0') + '-' + String(nowD.getDate()).padStart(2, '0');
@@ -817,11 +857,15 @@ function DashboardView({ employees, cars, appointments, onAddCar, onGoToCars, on
   ];
   const activeCard = statusCards.find((k) => k.key === activeStatus) ?? null;
   const resultList = activeCard ? activeCard.list : [];
-  const periodLabel = useToday ? 'ASTĂZI' : `${applied.from ? new Date(applied.from + 'T00:00:00').toLocaleDateString('ro-RO') : '...'} – ${applied.to ? new Date(applied.to + 'T00:00:00').toLocaleDateString('ro-RO') : '...'}`;
   const todayAppointments = appointments.filter((a: Appointment) => a.appointment_date === todayStr);
-  // Activitate lunară — date reale (mașini create în luna curentă)
+  const monthlyJobs = cars.flatMap((car: Car) => (car.jobs ?? []).map((job: Job) => ({ car, job }))).filter(({ car, job }) => {
+    const date = job.completed_at ?? job.started_at ?? car.created_at;
+    const value = new Date(date);
+    return value.getFullYear() === nowD.getFullYear() && value.getMonth() === nowD.getMonth();
+  });
+  const finalizedTodayJobs = cars.flatMap((car: Car) => (car.jobs ?? []).filter((job: Job) => job.status === 'finalizat' && job.completed_at && new Date(job.completed_at).toDateString() === nowD.toDateString()).map((job: Job) => ({ car, job }))).sort((a, b) => new Date(b.job.completed_at!).getTime() - new Date(a.job.completed_at!).getTime());
   const daysInMonth = new Date(nowD.getFullYear(), nowD.getMonth() + 1, 0).getDate();
-  const perDay = Array.from({ length: daysInMonth }, (_, i) => cars.filter((c: Car) => c.created_at && new Date(c.created_at).getFullYear() === nowD.getFullYear() && new Date(c.created_at).getMonth() === nowD.getMonth() && new Date(c.created_at).getDate() === i + 1).length);
+  const perDay = Array.from({ length: daysInMonth }, (_, i) => monthlyJobs.filter(({ car, job }) => { const date = new Date(job.completed_at ?? job.started_at ?? car.created_at); return date.getDate() === i + 1; }).length);
   const maxDay = Math.max(1, ...perDay);
   // Distribuție financiară — mașini finalizate (aceeași sursă ca Rapoarte)
   const finalizedAll = cars.filter((c: Car) => getCarStatus(c.jobs ?? []) === 'finalizata');
@@ -840,13 +884,8 @@ function DashboardView({ employees, cars, appointments, onAddCar, onGoToCars, on
   const areaPts = `0,${chartH} ${pts} ${chartW},${chartH}`;
   const donutR = 54; const donutC = 2 * Math.PI * donutR;
   let finOffset = 0;
-  return <div className="space-y-5">
-<div>
-<p className="text-[13px] font-bold uppercase tracking-[0.18em]" style={{ color: SV.purple }}>Control service</p>
-<h2 className="mt-2 text-[32px] font-bold leading-tight" style={{ color: SV.navy }}>Dashboard</h2>
-<p className="mt-2 text-sm" style={{ color: SV.sec }}>Prezentare generală a activității service-ului în timp real.</p>
-</div>
-<div className="rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}>
+  return <div className="flex flex-col gap-5">
+<div className="order-2 rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}>
 <div className="flex flex-wrap items-center justify-between gap-3">
 <div className="flex items-center gap-3">
 <span className="flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: SV.lav, color: SV.purple }}><CalendarClock size={18} /></span>
@@ -861,17 +900,16 @@ function DashboardView({ employees, cars, appointments, onAddCar, onGoToCars, on
 <span className={`ml-auto shrink-0 rounded-lg px-2.5 py-1 text-[10px] font-bold ${appointmentStatusStyles[apt.status]}`}>{appointmentStatusLabels[apt.status]}</span>
 </div>)}</div>}
 </div>
-<div className="rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}>
+<div className="order-5 rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}>
 <div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: SV.lav, color: SV.purple }}><SlidersHorizontal size={18} /></span><div><h3 className="text-[18px] font-bold leading-tight" style={{ color: SV.navy }}>Filtrare</h3><p className="text-xs" style={{ color: SV.muted }}>Filtrează activitatea pe angajat și perioadă.</p></div></div>
 <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
 <label className="block text-[13px] font-semibold" style={{ color: SV.muted }}>Angajat<select value={draftEmployee} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setDraftEmployee(e.target.value)} className="mt-2 h-[50px] w-full rounded-lg border bg-[var(--surface)] px-3 text-sm font-semibold outline-none focus:border-[var(--primary)]" style={{ borderColor: SV.border, color: SV.navy }}><option value="all">Toți angajații</option>{employees.filter((e: Employee) => e.role === 'employee').map((e: Employee) => <option key={e.id} value={e.id}>{e.name}{e.is_demo ? ' (DEMO)' : ''}</option>)}</select></label>
 <label className="block text-[13px] font-semibold" style={{ color: SV.muted }}>De la<input type="date" value={draftFrom} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDraftFrom(e.target.value)} className="mt-2 h-[50px] w-full rounded-lg border bg-[var(--surface)] px-3 text-sm font-semibold outline-none focus:border-[var(--primary)]" style={{ borderColor: SV.border, color: SV.navy }} /></label>
 <label className="block text-[13px] font-semibold" style={{ color: SV.muted }}>Până la<input type="date" value={draftTo} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDraftTo(e.target.value)} className="mt-2 h-[50px] w-full rounded-lg border bg-[var(--surface)] px-3 text-sm font-semibold outline-none focus:border-[var(--primary)]" style={{ borderColor: SV.border, color: SV.navy }} /></label>
-<div className="flex items-end gap-2"><button onClick={() => setApplied({ employee: draftEmployee, from: draftFrom, to: draftTo })} className="flex h-[50px] flex-1 items-center justify-center gap-2 rounded-lg text-sm font-bold text-white transition hover:brightness-110" style={{ background: SV.purple }}><SlidersHorizontal size={16} /> Aplică filtrele</button><button onClick={() => { setDraftEmployee('all'); setDraftFrom(''); setDraftTo(''); setApplied({ employee: 'all', from: '', to: '' }); }} title="Resetează la ASTĂZI" className="flex h-[50px] items-center justify-center rounded-lg border px-4 text-sm font-bold transition hover:bg-[var(--surface-secondary)]" style={{ borderColor: SV.border, color: SV.sec }}><X size={16} /></button></div>
-<p className="mt-3 text-xs font-semibold" style={{ color: SV.muted }}>Perioadă activă: <span style={{ color: SV.purple }}>{periodLabel}</span>{applied.employee !== 'all' ? <> • <span style={{ color: SV.purple }}>{employees.find((e: Employee) => e.id === applied.employee)?.name ?? 'Angajat'}</span></> : null}</p>
+<div className="flex items-end gap-2"><button onClick={() => setApplied({ employee: draftEmployee, from: draftFrom, to: draftTo })} className="flex h-[50px] flex-1 items-center justify-center gap-2 rounded-lg text-sm font-bold text-white transition hover:brightness-110" style={{ background: SV.purple }}><SlidersHorizontal size={16} /> Aplică filtrele</button></div>
 </div>
 </div>
-<div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+<div className="order-3 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
 {statusCards.map((k) => { const isActive = activeStatus === k.key; return <button key={k.key} onClick={() => setActiveStatus(isActive ? null : k.key)} className="group rounded-[16px] border bg-[var(--surface)] p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md" style={{ borderColor: isActive ? k.dot : SV.border, background: isActive ? k.bg : '#fff', boxShadow: isActive ? '0 4px 20px rgba(50,40,100,0.10)' : undefined }}>
 <div className="flex items-start justify-between">
 <span className="text-[11px] font-bold uppercase tracking-[0.12em]" style={{ color: SV.sec }}>{k.label}</span>
@@ -881,15 +919,14 @@ function DashboardView({ employees, cars, appointments, onAddCar, onGoToCars, on
 <span className="mt-3 inline-block text-sm font-bold transition group-hover:brightness-125" style={{ color: k.dot }}>{isActive ? 'Ascunde ↑' : 'Vezi detalii →'}</span>
 </button>; })}
 </div>
-{activeCard && <div className="overflow-hidden rounded-[16px] border bg-[var(--surface)] shadow-sm" style={{ borderColor: SV.border }}>
+{activeCard && activeStatus !== 'in_lucru' && activeStatus !== 'finalizata' && <div className="order-4 overflow-hidden rounded-[16px] border bg-[var(--surface)] shadow-sm" style={{ borderColor: SV.border }}>
 <div className="flex flex-wrap items-center justify-between gap-3 border-b px-6 py-4" style={{ borderColor: SV.border }}>
 <h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>Mașini — {activeCard.label} ({resultList.length})</h3>
 <div className="flex items-center gap-3">
-<span className="text-xs font-semibold" style={{ color: SV.muted }}>Perioadă: {periodLabel}</span>
 <button onClick={() => setActiveStatus(null)} className="rounded-lg border px-3 py-1.5 text-xs font-bold transition hover:bg-[var(--surface-secondary)]" style={{ borderColor: SV.border, color: SV.sec }}>Ascunde ↑</button>
 </div>
 </div>
-{resultList.length === 0 ? <p className="p-8 text-center text-sm" style={{ color: SV.sec }}>Nu există mașini pentru acest status în perioada selectată.</p> : resultList.map((car: Car) => <div key={car.id} className="grid grid-cols-1 gap-2 border-b px-6 py-4 last:border-0 sm:grid-cols-[1fr_1fr_1fr_0.9fr_1.1fr_0.8fr_90px] sm:items-center sm:gap-4" style={{ borderColor: SV.border }}>
+{resultList.length === 0 ? <p className="p-8 text-center text-sm" style={{ color: SV.sec }}>Nu există mașini pentru acest status în perioada selectată.</p> : resultList.map((car: Car) => <div key={car.id} className="grid grid-cols-1 gap-2 border-b px-6 py-4 last:border-0 sm:grid-cols-[1fr_1fr_1fr_0.9fr_1.1fr_0.8fr_90px_110px] sm:items-center sm:gap-4" style={{ borderColor: SV.border }}>
 <span className="text-sm font-semibold" style={{ color: SV.navy }}>{car.client_name}</span>
 <span className="text-sm" style={{ color: SV.sec }}>{car.make} {car.model}</span>
 <span className="text-sm font-bold" style={{ color: SV.navy }}>{car.license_plate}</span>
@@ -897,13 +934,14 @@ function DashboardView({ employees, cars, appointments, onAddCar, onGoToCars, on
 {(() => { const n = employees.find((e: Employee) => e.id === car.assigned_employee_id)?.name ?? '—'; return <span className="flex min-w-0 items-center gap-2"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold" style={{ background: SV.lav, color: SV.purple }}>{n[0]}</span><span className="truncate text-sm font-medium" style={{ color: SV.navy }}>{n}</span></span>; })()}
 <span className="font-mono text-sm" style={{ color: SV.sec }}>{formatShortDuration(totalWorkedSeconds(car.jobs))}</span>
 <Badge value={getCarStatus(car.jobs ?? [])} compact />
+{(() => { const job = (car.jobs ?? [])[0]; const activeJob = (car.jobs ?? []).find((j: Job) => j.status === 'in_lucru') ?? job; if (!activeJob) return null; return <div className="flex items-center gap-2"><button onClick={() => setDashDetails({ job: activeJob, car })} className="rounded-lg border px-3 py-1.5 text-xs font-bold transition hover:bg-[var(--surface-secondary)]" style={{ borderColor: SV.border, color: SV.purple }}>Detalii</button>{(getCarStatus(car.jobs ?? []) !== 'finalizata') && <button title="Schimbă alocatul" onClick={() => setDashChangeAlloc({ job: activeJob, car })} className="rounded-lg p-1.5 text-[var(--text-secondary)] transition hover:bg-[var(--border)] hover:text-[var(--text-primary)]" style={{ color: SV.sec }}><UserRound size={15} /></button>}</div>; })()}
 </div>)}
 </div>}
-<div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
+<div className="order-6 grid gap-5 xl:grid-cols-[1.4fr_1fr]">
 <div className="rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}>
 <div className="flex items-center justify-between">
 <div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: SV.lav, color: SV.purple }}><FileBarChart size={18} /></span><div><h3 className="text-[18px] font-bold leading-tight" style={{ color: SV.navy }}>Lucrări în această lună</h3><p className="text-xs" style={{ color: SV.muted }}>{new Date().toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' })}</p></div></div>
-<div className="text-right"><span className="text-[28px] font-bold leading-none" style={{ color: SV.purple }}>{cars.filter((c: Car) => c.created_at && new Date(c.created_at).getFullYear() === nowD.getFullYear() && new Date(c.created_at).getMonth() === nowD.getMonth()).length}</span><p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: SV.muted }}>Total lucrări</p></div>
+<div className="text-right"><span className="text-[28px] font-bold leading-none" style={{ color: SV.purple }}>{monthlyJobs.length}</span><p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: SV.muted }}>Total lucrări</p></div>
 </div>
 {perDay.every((v) => v === 0) ? <p className="mt-6 rounded-xl border border-dashed py-10 text-center text-sm" style={{ borderColor: SV.border, color: SV.sec }}>Nu există activitate înregistrată în această lună.</p> : <svg viewBox={`0 0 ${chartW} ${chartH}`} className="mt-5 h-40 w-full" preserveAspectRatio="none">
 <polygon points={areaPts} fill="var(--primary)" opacity="0.08" />
@@ -911,7 +949,7 @@ function DashboardView({ employees, cars, appointments, onAddCar, onGoToCars, on
 </svg>}
 <div className="mt-2 flex justify-between text-[10px] font-semibold" style={{ color: SV.muted }}><span>1</span><span>{Math.ceil(daysInMonth / 2)}</span><span>{daysInMonth}</span></div>
 </div>
-<div className="rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}>
+<div className="order-7 rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}>
 <h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>Distribuție financiară</h3>
 <p className="text-xs" style={{ color: SV.muted }}>Mașini finalizate</p>
 <div className="mt-4 flex items-center gap-6">
@@ -930,7 +968,7 @@ function DashboardView({ employees, cars, appointments, onAddCar, onGoToCars, on
 </div>
 </div>
 </div>
-<div className="rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}>
+<div className="order-7 rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}>
 <div className="flex items-center justify-between">
 <h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>Top angajați</h3>
 <span className="rounded-lg px-2.5 py-1 text-xs font-bold" style={{ background: SV.lav, color: SV.purple }}>După timp lucrat</span>
@@ -949,7 +987,9 @@ function DashboardView({ employees, cars, appointments, onAddCar, onGoToCars, on
 </div>
 <button onClick={onGoToEmployees} className="mt-5 text-sm font-bold transition hover:brightness-125" style={{ color: SV.purple }}>Vezi toți angajații →</button>
 </div>
-<div className="rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}>
+{activeStatus === 'in_lucru' && <div className="order-4"><LiveMonitorSection cars={cars} employees={employees} schedule={schedule} employeeName={employeeName} onRefresh={onRefresh} onDetails={(job, car) => setDashDetails({ job, car })} onChangeAllocation={(job, car) => setDashChangeAlloc({ job, car })} /></div>}
+{activeStatus === 'finalizata' && <div className="order-4 rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}><h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>Mașini — FINALIZATE ASTĂZI ({finalizedTodayJobs.length})</h3>{finalizedTodayJobs.length === 0 ? <p className="mt-4 py-4 text-center text-sm" style={{ color: SV.sec }}>Nu există mașini finalizate astăzi.</p> : <div className="mt-4 space-y-3">{finalizedTodayJobs.map(({ car, job }) => <div key={job.id} className="grid grid-cols-1 gap-3 rounded-xl border p-3.5 sm:grid-cols-[1fr_1fr_1fr_1fr_auto] sm:items-center" style={{ borderColor: SV.border }}><span className="text-sm font-semibold" style={{ color: SV.navy }}>{car.client_name}</span><span className="text-sm" style={{ color: SV.sec }}>{car.make} {car.model}</span><span className="text-sm font-bold" style={{ color: SV.navy }}>{car.license_plate}</span><span className="text-xs" style={{ color: SV.sec }}>{new Date(job.completed_at!).toLocaleString('ro-RO')} • {employeeName(car.assigned_employee_id)}</span><div className="flex justify-end"><button onClick={() => setDashDetails({ job, car })} className="rounded-lg border px-3 py-1.5 text-xs font-bold transition hover:bg-[var(--surface-secondary)]" style={{ borderColor: SV.border, color: SV.purple }}>Detalii</button></div></div>)}</div>}</div>}
+<div className="order-10 rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}>
 <h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>Acțiuni rapide</h3>
 <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 <button onClick={onAddCar} className="flex items-center gap-3 rounded-xl px-4 py-3.5 text-left text-sm font-bold text-white transition hover:brightness-110" style={{ background: SV.purple }}><Plus size={17} /> Adaugă mașină</button>
@@ -958,7 +998,9 @@ function DashboardView({ employees, cars, appointments, onAddCar, onGoToCars, on
 <button onClick={onGoToReports} className="flex items-center gap-3 rounded-xl border px-4 py-3.5 text-left text-sm font-bold transition hover:bg-[var(--surface-secondary)]" style={{ borderColor: SV.border, color: SV.navy }}><FileBarChart size={17} style={{ color: SV.purple }} /> Vezi rapoarte</button>
 </div>
 </div>
-<p className="pb-4 pt-1 text-center text-xs" style={{ color: SV.muted }}>Date actualizate în timp real.</p>
+<p className="order-10 pb-4 pt-1 text-center text-xs" style={{ color: SV.muted }}>Date actualizate în timp real.</p>
+        {dashDetails && <AdminJobDetailsModal job={dashDetails.job} car={dashDetails.car} rates={rates} employeeName={employeeName} onClose={() => setDashDetails(null)} onShowCar={onShowCar} />}
+        {dashChangeAlloc && <ChangeJobAllocationModal job={dashChangeAlloc.job} car={dashChangeAlloc.car} employees={employees} employeeName={employeeName} onSaved={async () => { await onRefresh(); }} onClose={() => setDashChangeAlloc(null)} />}
 </div>;
 }
 
@@ -1002,11 +1044,156 @@ function CarsView({ cars, query, setQuery, statusFilter, setStatusFilter, priori
 // ============================================================
 // JOBS VIEW
 // ============================================================
-function JobsView({ cars, employees, employeeName, onShowCar }: { cars: Car[]; employees: Employee[]; employeeName: (id: string | null) => string; onShowCar: (car: Car) => void }) {
+function JobsView({ cars, employees, rates, employeeName, onShowCar, onRefresh }: { cars: Car[]; employees: Employee[]; rates: Rates | null; employeeName: (id: string | null) => string; onShowCar: (car: Car) => void; onRefresh: () => Promise<void> }) {
   const allJobs = useMemo(() => cars.flatMap((car: Car) => (car.jobs ?? []).map((job: Job) => ({ job, car }))).sort((a, b) => a.job.order_index - b.job.order_index), [cars]);
   const [jobFilter, setJobFilter] = useState<'toate' | JobStatus>('toate');
-  const filtered = jobFilter === 'toate' ? allJobs : allJobs.filter(({ job }) => job.status === jobFilter);
-  return <><div className="mb-6"><h2 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Lucrări</h2><p className="mt-1 text-sm" style={{ color: 'var(--text-secondary)' }}>Toate lucrările din service, grupate pe mașini.</p></div><div className="mb-5 flex flex-wrap gap-2">{([['toate','Toate'],['asteptare','Disponibile'],['in_lucru','În lucru'],['asteptare_piese','Așteptare piese'],['finalizat','Finalizate']] as const).map(([key, label]) => <button key={key} onClick={() => setJobFilter(key)} className="rounded-lg px-4 py-2 text-sm font-bold transition" style={jobFilter === key ? { background: 'var(--button)', color: 'white' } : { borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>{label}</button>)}</div><div className="space-y-3">{filtered.length === 0 ? <div className="rounded-xl border border-dashed bg-[var(--surface)] p-10 text-center text-sm" style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>Nu există lucrări pentru filtrul selectat.</div> : filtered.map(({ job, car }) => <button key={job.id} onClick={() => onShowCar(car)} className="flex w-full items-center justify-between gap-4 rounded-xl border bg-[var(--surface)] p-4 text-left shadow-sm transition hover:shadow-md" style={{ borderColor: 'var(--border)' }}><div className="flex items-center gap-3"><div className={`flex h-10 w-10 items-center justify-center rounded-lg ${job.status === 'finalizat' ? 'bg-emerald-100 text-emerald-700' : job.status === 'in_lucru' ? 'bg-blue-100 text-blue-700' : 'bg-[var(--border)] text-[var(--text-secondary)]'}`}>{job.status === 'finalizat' ? <Check size={18} /> : <Wrench size={17} />}</div><div><p className="font-bold" style={{ color: 'var(--text-primary)' }}>{job.title}</p><p className="mt-0.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{car.license_plate} • {car.client_name} • {employeeName(car.assigned_employee_id)}</p></div></div><div className="flex items-center gap-3"><span className="font-mono text-sm" style={{ color: 'var(--text-secondary)' }}>{formatShortDuration(job.worked_seconds)}</span><Badge value={job.status} compact /></div></button>)}</div></>;
+  const [detailsJob, setDetailsJob] = useState<{ job: Job; car: Car } | null>(null);
+  const [changeAllocJob, setChangeAllocJob] = useState<{ job: Job; car: Car } | null>(null);
+  const [query, setQuery] = useState('');
+  // Căutare locală (fără query DB nou) după număr înmatriculare, VIN, denumire lucrare și angajat.
+  const matchesQuery = (car: Car, job: Job): boolean => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    const plate = (car.license_plate ?? '').toLowerCase();
+    const vin = (car.vin ?? '').toLowerCase();
+    const title = (job.title ?? '').toLowerCase();
+    const emp = employeeName(car.assigned_employee_id).toLowerCase();
+    return plate.includes(q) || vin.includes(q) || title.includes(q) || emp.includes(q);
+  };
+  // Sortare FINALIZATE: descrescător după momentul real al finalizării (jobs.completed_at),
+  // cea mai recentă finalizată prima. Celelalte filtre păstrează ordinea existentă.
+  // Căutarea respectă tab-ul activ.
+  const filtered = useMemo(() => {
+    const list = jobFilter === 'toate' ? allJobs : allJobs.filter(({ job }) => job.status === jobFilter);
+    const searched = query.trim() ? list.filter(({ job, car }) => matchesQuery(car, job)) : list;
+    if (jobFilter !== 'finalizat') return searched;
+    return [...searched].sort((a, b) => {
+      const ta = a.job.completed_at ? new Date(a.job.completed_at).getTime() : 0;
+      const tb = b.job.completed_at ? new Date(b.job.completed_at).getTime() : 0;
+      return tb - ta;
+    });
+  }, [allJobs, jobFilter, query]);
+  return <><div className="mb-6"><h2 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Lucrări</h2><p className="mt-1 text-sm" style={{ color: 'var(--text-secondary)' }}>Toate lucrările din service, grupate pe mașini.</p></div><div className="mb-5 flex flex-wrap gap-2">{([['toate','Toate'],['asteptare','Disponibile'],['in_lucru','În lucru'],['asteptare_piese','Așteptare piese'],['finalizat','Finalizate']] as const).map(([key, label]) => <button key={key} onClick={() => setJobFilter(key)} className="rounded-lg px-4 py-2 text-sm font-bold transition" style={jobFilter === key ? { background: 'var(--button)', color: 'white' } : { borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>{label}</button>)}</div><div className="relative mb-3"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" size={16} /><input value={query} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)} placeholder="Caută după număr, VIN sau lucrare..." className="h-10 w-full rounded-lg border bg-[var(--surface)] pl-9 pr-4 text-sm outline-none" style={{ borderColor: 'var(--border)' }} /></div><div className="space-y-3">{filtered.length === 0 ? <div className="rounded-xl border border-dashed bg-[var(--surface)] p-10 text-center text-sm" style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>{query.trim() ? 'Nu există lucrări care corespund căutării.' : 'Nu există lucrări pentru filtrul selectat.'}</div> : filtered.map(({ job, car }) => <div key={job.id} role="button" tabIndex={0} onClick={() => setDetailsJob({ job, car })} onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter') setDetailsJob({ job, car }); }} className="flex w-full cursor-pointer items-center justify-between gap-4 rounded-xl border bg-[var(--surface)] p-4 text-left shadow-sm transition hover:shadow-md" style={{ borderColor: 'var(--border)' }}><div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${job.status === 'finalizat' ? 'bg-emerald-100 text-emerald-700' : job.status === 'in_lucru' ? 'bg-blue-100 text-blue-700' : 'bg-[var(--border)] text-[var(--text-secondary)]'}`}>{job.status === 'finalizat' ? <Check size={18} /> : <Wrench size={17} />}</div><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><p className="truncate text-lg font-extrabold leading-tight tracking-tight" style={{ color: 'var(--text-primary)' }}>{car.license_plate}</p><span className="shrink-0 rounded-lg px-2.5 py-1 text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--primary)', background: 'color-mix(in srgb, var(--primary) 12%, transparent)' }}>{employeeName(car.assigned_employee_id)}</span></div><p className="mt-0.5 truncate text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{job.title}</p></div><div className="flex shrink-0 items-center gap-3"><span className="font-mono text-sm" style={{ color: 'var(--text-secondary)' }}>{formatShortDuration(job.worked_seconds)}{job.status === 'finalizat' ? ' · FINALIZAT' : ''}</span>{job.status !== 'finalizat' && <Badge value={job.status} compact />}<button onClick={(e: React.MouseEvent) => { e.stopPropagation(); setDetailsJob({ job, car }); }} className="rounded-lg border px-3 py-1.5 text-xs font-bold transition hover:bg-[var(--surface-secondary)]" style={{ borderColor: 'var(--border)', color: 'var(--primary)' }}>Detalii</button><button onClick={(e: React.MouseEvent) => { e.stopPropagation(); onShowCar(car); }} className="rounded-lg border px-3 py-1.5 text-xs font-bold transition hover:bg-[var(--surface-secondary)]" style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>Mașină</button>{jobFilter === 'toate' && <button title="Schimbă alocatul" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setChangeAllocJob({ job, car }); }} className="rounded-lg p-1.5 text-[var(--text-secondary)] transition hover:bg-[var(--border)] hover:text-[var(--text-primary)]"><UserRound size={15} /></button>}</div></div>)}</div>
+      {detailsJob && <AdminJobDetailsModal job={detailsJob.job} car={detailsJob.car} rates={rates} employeeName={employeeName} onClose={() => setDetailsJob(null)} onShowCar={onShowCar} />}
+      {changeAllocJob && <ChangeJobAllocationModal job={changeAllocJob.job} car={changeAllocJob.car} employees={employees} employeeName={employeeName} onSaved={async () => { await onRefresh(); }} onClose={() => setChangeAllocJob(null)} />}
+    </>;
+}
+
+// ============================================================
+// ADMIN JOB DETAILS PANEL
+// ============================================================
+function AdminJobDetailsModal({ job, car, rates, employeeName, onClose, onShowCar }: { job: Job; car: Car; rates: Rates | null; employeeName: (id: string | null) => string; onClose: () => void; onShowCar: (car: Car) => void }) {
+  const normalSec = job.worked_seconds - (job.overtime_seconds ?? 0);
+  const overtimeSec = job.overtime_seconds ?? 0;
+  const fmtDateTime = (ts: string | null) => ts ? new Date(ts).toLocaleString('ro-RO', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+  const Section = ({ title, children }: { title: string; children: React.ReactNode }) => <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4"><p className="mb-3 text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: 'var(--primary)' }}>{title}</p>{children}</div>;
+  const Row = ({ label, value }: { label: string; value: React.ReactNode }) => <div className="flex items-baseline justify-between gap-4 py-1"><span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>{label}</span><span className="text-right text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{value}</span></div>;
+  return <Modal title={`Detalii lucrare — ${car.license_plate}`} onClose={onClose} wide>
+    <div className="space-y-4 p-6">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Section title="Mașină">
+          <Row label="Număr înmatriculare" value={car.license_plate} />
+          <Row label="Marcă / Model" value={`${car.make ?? '—'}${car.model ? ` ${car.model}` : ''}`} />
+          <Row label="An" value={car.year ?? '—'} />
+          <Row label="Proprietar" value={car.client_name} />
+          <Row label="Telefon" value={car.client_phone ?? '—'} />
+        </Section>
+        <Section title="Lucrare">
+          <Row label="Denumire" value={job.title} />
+          <Row label="Status" value={job.status === 'finalizat' ? 'Finalizat' : job.status === 'in_lucru' ? 'În lucru' : job.status === 'asteptare_piese' ? 'Așteptare piese' : 'Disponibil'} />
+          <Row label="Început" value={fmtDateTime(job.started_at)} />
+          <Row label="Finalizat" value={fmtDateTime(job.completed_at)} />
+        </Section>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Section title="Angajați">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold" style={{ background: 'color-mix(in srgb, var(--primary) 12%, transparent)', color: 'var(--primary)' }}>{(employeeName(car.assigned_employee_id) || '?')[0]}</span>
+            <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{employeeName(car.assigned_employee_id) || '—'}</span>
+          </div>
+        </Section>
+        <Section title="Timp lucrat">
+          <Row label="Timp total" value={formatShortDuration(job.worked_seconds)} />
+          <Row label="Ore normale" value={formatShortDuration(normalSec)} />
+          <Row label="Ore suplimentare" value={formatShortDuration(overtimeSec)} />
+          <Row label="worked_seconds" value={<span className="font-mono">{job.worked_seconds}s</span>} />
+          <Row label="overtime_seconds" value={<span className="font-mono">{overtimeSec}s</span>} />
+        </Section>
+      </div>
+      {job.description && <Section title="Descriere lucrare"><p className="text-sm" style={{ color: 'var(--text-primary)' }}>{job.description}</p></Section>}
+      {car.notes && <Section title="Observații mașină"><p className="text-sm" style={{ color: 'var(--text-primary)' }}>{car.notes}</p></Section>}
+      <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--border)] pt-4">
+        <button onClick={onClose} className="rounded-lg border border-[var(--border)] px-4 py-2.5 text-sm font-bold transition hover:bg-[var(--surface-secondary)]" style={{ color: 'var(--text-secondary)' }}>Închide</button>
+        <button onClick={() => generateReportPdf(`servix_raport_lucrare_${slugify(car.license_plate)}_${slugify(job.title)}.pdf`, buildSingleJobReportLines(job, car, rates, employeeName))} className="flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold text-white transition hover:brightness-110" style={{ background: 'var(--button)' }}><FileText size={16} /> GENEREAZĂ RAPORT PDF</button>
+        <button onClick={() => { onClose(); onShowCar(car); }} className="rounded-lg px-4 py-2.5 text-sm font-bold text-white transition hover:brightness-110" style={{ background: 'var(--button)' }}>Deschide mașina</button>
+      </div>
+    </div>
+  </Modal>;
+}
+
+// ============================================================
+// ADMIN — SCHIMBĂ ALOCATUL LUCRĂRII
+// ============================================================
+// Alocarea este definită la nivel de MAȘINĂ (cars.assigned_employee_id),
+// nu la nivel de job — există un singur angajat alocat per mașină.
+// Schimbarea alocatului unei lucrări = reassignment al mașinii părințits
+// (car.assigned_employee_id). Acest lucru NU resetează niciun timer și
+// NU modifică worked_seconds / overtime_seconds / started_at / is_overtime.
+// Se reutilizează RPC-ul existent `admin_transfer_car` (+ fallback direct),
+// același pattern ca în Dashboard → Mașini în lucru → Detalii → Schimbă angajatul.
+function ChangeJobAllocationModal({ job, car, employees, employeeName, onSaved, onClose }: { job: Job; car: Car; employees: Employee[]; employeeName: (id: string | null) => string; onSaved: () => Promise<void>; onClose: () => void }) {
+  const empOptions = employees.filter((e: Employee) => e.role === 'employee');
+  const [newEmpId, setNewEmpId] = useState<string>('');
+  const [saving, setSaving] = useState<boolean>(false);
+  const [msg, setMsg] = useState<string>('');
+  const handleConfirm = async (): Promise<void> => {
+    if (!newEmpId) { setMsg('Selectează un angajat.'); return; }
+    if (newEmpId === car.assigned_employee_id) { setMsg('Acest angajat este deja alocat.'); return; }
+    setSaving(true); setMsg('');
+    const adminId = employees.find((e: Employee) => e.role === 'admin')?.id ?? null;
+    const res = await supabase.rpc('admin_transfer_car', { p_car_id: car.id, p_new_employee_id: newEmpId, p_admin_id: adminId });
+    if (res.error || (res.data && (res.data as { ok?: boolean } | null)?.ok === false)) {
+      const up = await supabase.from('cars').update({ assigned_employee_id: newEmpId }).eq('id', car.id);
+      if (up.error) { setMsg('Nu am putut schimba alocatul.'); setSaving(false); return; }
+      const newEmp = empOptions.find((e: Employee) => e.id === newEmpId);
+      await supabase.from('activity_log').insert({ employee_id: null, car_id: car.id, job_id: job.id, action: 'transfer', detail: `Administratorul a transferat lucrarea de la ${employeeName(car.assigned_employee_id)} la ${newEmp?.name ?? '?'}` });
+    } else if (res.data && (res.data as { ok?: boolean }).ok === true) {
+      void supabase.from('activity_log').insert({ employee_id: newEmpId, car_id: car.id, job_id: job.id, action: 'transfer', detail: 'Administratorul a schimbat alocatorul lucrării (istoric păstrat)' });
+    }
+    setMsg('Alocatorul a fost schimbat — timpul lucrat rămâne păstrat.');
+    setSaving(false);
+    await onSaved();
+    onClose();
+  };
+  return <Modal title="Schimbă alocatul" onClose={onClose}>
+    <div className="space-y-5 p-6">
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Lucrare</p>
+        <p className="mt-1 text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{job.title}</p>
+      </div>
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Mașină</p>
+        <p className="mt-1 text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{car.license_plate} • {car.make} {car.model}</p>
+      </div>
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Alocat acum</p>
+        <p className="mt-1 text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{employeeName(car.assigned_employee_id)}</p>
+      </div>
+      <div>
+        <label className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Selectează noul alocat</label>
+        <select value={newEmpId} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setNewEmpId(e.target.value)} className="mt-2 h-11 w-full rounded-lg border bg-[var(--surface)] px-3 text-sm font-semibold outline-none" style={{ borderColor: 'var(--border)' }}>
+          <option value="">— selectează angajat —</option>
+          {empOptions.map((e: Employee) => <option key={e.id} value={e.id}>{e.name}</option>)}
+        </select>
+      </div>
+      {msg && <p className="text-sm font-semibold" style={{ color: msg.includes('deja') ? 'var(--danger)' : 'var(--success)' }}>{msg}</p>}
+      <p className="mt-1 text-[11px]" style={{ color: 'var(--text-secondary)' }}>Timpul deja lucrat rămâne păstrat — niciun timer nu este resetat.</p>
+      <div className="flex justify-end gap-3 border-t border-[var(--border)] pt-4">
+        <button onClick={onClose} disabled={saving} className="rounded-lg border px-4 py-2.5 text-sm font-bold transition hover:bg-[var(--surface-secondary)]" style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>ANULEAZĂ</button>
+        <button onClick={() => void handleConfirm()} disabled={saving || !newEmpId} className="rounded-lg px-4 py-2.5 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-40" style={{ background: 'var(--button)' }}>{saving ? 'Se salvează...' : 'CONFIRMĂ SCHIMBAREA'}</button>
+      </div>
+    </div>
+  </Modal>;
 }
 
 // ============================================================
@@ -1014,9 +1201,9 @@ function JobsView({ cars, employees, employeeName, onShowCar }: { cars: Car[]; e
 // ============================================================
 /** Shared report content used by both PDF generators. */
 function buildCarReportLines(car: Car, rates: Rates | null, plateHistory: PlateHistoryEntry[], mileageLog: MileageLogEntry[], empName: string): PdfLine[] {
-  const normalSec = normalWorkedSeconds(car.jobs);
   const overtimeSec = totalOvertimeSeconds(car.jobs);
   const totalSec = totalWorkedSeconds(car.jobs);
+  const normalSec = totalSec - overtimeSec;
   const normalRate = car.is_warranty ? (rates?.warranty_rate ?? 0) : (rates?.normal_rate ?? 100);
   const overtimeRate = rates?.overtime_rate ?? 150;
   const normalCost = (normalSec / 3600) * normalRate;
@@ -1064,7 +1251,37 @@ function buildCarReportLines(car: Car, rates: Rates | null, plateHistory: PlateH
     for (const m of mileageLog) lines.push(pdfRow(formatMileage(m.mileage), new Date(m.recorded_at).toLocaleDateString('ro-RO')));
   }
   lines.push(pdfHeading('Generat'), pdfRow('Data generarii', `${new Date().toLocaleString('ro-RO')} - SERVIX Service Auto`));
-  return lines;
+    return lines;
+}
+
+/** PDF pentru O SINGURĂ lucrare selectată (reutilizează computeJobCost + logica TVA). */
+function buildSingleJobReportLines(job: Job, car: Car, rates: Rates | null, employeeName: (id: string | null) => string): PdfLine[] {
+  const cost = computeJobCost(job, car, rates);
+  const vatRate = rates?.vat_rate ?? 21;
+  const totalWithoutVat = cost.totalCost;
+  const vatAmount = (totalWithoutVat * vatRate) / 100;
+  const totalWithVat = totalWithoutVat + vatAmount;
+  const dataFin = job.completed_at ?? job.started_at;
+  return [
+    pdfTitle('SERVIX - Raport per lucrare'),
+    pdfRow('Tip raport', 'Per lucrare (o singură lucrare)'),
+    pdfRow('Lucrare', job.title),
+    pdfRow('Data finalizării', dataFin ? new Date(dataFin).toLocaleDateString('ro-RO') : '-'),
+    pdfHeading(`${car.license_plate} — ${job.title}`),
+    pdfRow('  Număr înmatriculare', car.license_plate),
+    pdfRow('  Marca / Model', `${car.make ?? '-'} ${car.model ?? ''}`.trim()),
+    pdfRow('  Proprietar', car.client_name),
+    pdfRow('  Angajat', employeeName(car.assigned_employee_id)),
+    pdfRow('  Data', dataFin ? new Date(dataFin).toLocaleDateString('ro-RO') : '-'),
+    pdfRow('  Ore lucrate', `${formatShortDuration(cost.totalSec)}  (normal ${formatShortDuration(cost.normalSec)} / peste program ${formatShortDuration(cost.overtimeSec)})`),
+    pdfRow('  Cost manopera', `${cost.totalCost.toFixed(2)} lei  (normal ${cost.normalCost.toFixed(2)} lei x ${cost.normalRate} lei/ora + supl. ${cost.overtimeCost.toFixed(2)} lei x ${cost.overtimeRate} lei/ora)`),
+    pdfHeading('Total'),
+    { text: `Total fără TVA: ${totalWithoutVat.toFixed(2)} lei`, size: 11, bold: false, gapBefore: 8 },
+    { text: `TVA (${vatRate}%): ${vatAmount.toFixed(2)} lei`, size: 11, bold: false },
+    { text: `TOTAL CU TVA: ${totalWithVat.toFixed(2)} lei`, size: 14, bold: true, gapBefore: 6 },
+    pdfHeading('Generat'),
+    pdfRow('Data generării', `${new Date().toLocaleString('ro-RO')} - SERVIX Service Auto`),
+  ];
 }
 /** Structura unei aparitii a unei lucrari un anumit an, cu cost calculat separat. */
 interface JobOccurrence {
@@ -1122,12 +1339,13 @@ function occurrencesPeriod(occs: JobOccurrence[]): string {
 }
 
 function formatHrCost(o: JobOccurrence): PdfLine[] {
+  const date = o.job.completed_at ?? o.job.started_at;
   return [
     pdfRow('  Masina', `${o.car.make ?? ''} ${o.car.model ?? ''}`.trim() || '-'),
     pdfRow('  Nr. inmatriculare', o.car.license_plate),
     pdfRow('  Client', o.car.client_name),
     pdfRow('  Angajat', o.emp),
-    pdfRow('  Data', (o.job.completed_at ?? o.job.started_at) ? new Date(o.job.completed_at ?? o.job.started_at).toLocaleDateString('ro-RO') : '-'),
+    pdfRow('  Data', date ? new Date(date).toLocaleDateString('ro-RO') : '-'),
     pdfRow('  Ore lucrate', `${formatShortDuration(o.totalSec)}  (normal ${formatShortDuration(o.normalSec)} / peste program ${formatShortDuration(o.overtimeSec)})`),
     pdfRow('  Cost manopera', `${o.totalCost.toFixed(2)} lei  (normal ${o.normalCost.toFixed(2)} lei x ${o.normalRate} lei/ora + supl. ${o.overtimeCost.toFixed(2)} lei x ${o.overtimeRate} lei/ora)`),
   ];
@@ -1224,58 +1442,17 @@ function slugify(s: string): string {
 
 
 function ReportsView({ cars, employees, rates, schedule, employeeName, onRefresh }: { cars: Car[]; employees: Employee[]; rates: Rates | null; schedule: Schedule | null; employeeName: (id: string | null) => string; onRefresh: () => Promise<void> }) {
-  const finalizedCars = cars.filter((c: Car) => getCarStatus(c.jobs ?? []) === 'finalizata');
-  const inLucruCars = cars.filter((c: Car) => getCarStatus(c.jobs ?? []) === 'in_lucru');
-  const partsCars = cars.filter((c: Car) => getCarStatus(c.jobs ?? []) === 'asteptare_piese');
+  const finalizedCarsAll = cars.filter((c: Car) => getCarStatus(c.jobs ?? []) === 'finalizata');
+  const [reportQuery, setReportQuery] = useState('');
+  const finalizedCars = useMemo(() => finalizedCarsAll.filter((car: Car) => {
+    const query = reportQuery.trim().toLowerCase();
+    if (!query) return true;
+    return [car.license_plate, car.vin, car.client_name].some((value) => (value ?? '').toLowerCase().includes(query));
+  }), [finalizedCarsAll, reportQuery]);
   const incasate = finalizedCars.filter((c: Car) => c.financial_status === 'incasat');
   const neincasate = finalizedCars.filter((c: Car) => c.financial_status === 'neincasat');
   const facturate = finalizedCars.filter((c: Car) => c.financial_status === 'facturat');
   const nefacturate = finalizedCars.filter((c: Car) => c.financial_status === 'nefacturat');
-  // ================================================================
-  // MONITOR „ÎN LUCRU” (live): timer local din started_at — baza de date rămâne sursa.
-
-  const [now, setNow] = useState(Date.now());
-  const [monitorCarId, setMonitorCarId] = useState<string | null>(null);
-  const [transferEmpId, setTransferEmpId] = useState('');
-  const [transferMsg, setTransferMsg] = useState('');
-  useEffect(() => { const id = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(id); }, []);
-  // Re-read datale periodic (fără refresh manual) doar cât timp pagina este deschisă.
-  useEffect(() => { const id = window.setInterval(() => { void onRefresh(); }, 10000); return () => window.clearInterval(id); }, [onRefresh]);
-// Timerul Admin = EXACT logica angajatului (PanouAngajat): normalul live crește doar în
-// ferestrele normale (overlapSeconds 'normal'), overtime-ul DOAR dacă is_overtime e pornit
-// și doar în fereastra ot. „Timp total” = DOAR ore normale (identic cu angajatul).
-const jobLiveTimes = (j: Job): { normal: number; overtime: number } => {
-    const storedNormal = j.worked_seconds ?? 0;
-    const storedOvertime = j.overtime_seconds ?? 0;
-    if (j.status !== 'in_lucru' || !j.started_at) return { normal: storedNormal, overtime: storedOvertime };
-    const runStartMs = new Date(j.started_at).getTime();
-    const liveNormal = overlapSeconds(schedule, runStartMs, now, 'normal');
-    const liveOvertime = j.is_overtime ? overlapSeconds(schedule, runStartMs, now, 'ot') : 0;
-    return { normal: storedNormal + liveNormal, overtime: storedOvertime + liveOvertime };
-  };
-  interface MonitorEntry { car: Car; job: Job; emp: string; startedAt: string | null; normalSec: number; overtimeSec: number; totalSec: number; }
-  const activeEntries: MonitorEntry[] = cars
-    .flatMap((car: Car) => (car.jobs ?? []).filter((j: Job) => j.status === 'in_lucru').map((j: Job) => { const t = jobLiveTimes(j); return { car, job: j, emp: employeeName(car.assigned_employee_id), startedAt: j.started_at, normalSec: t.normal, overtimeSec: t.overtime, totalSec: t.normal }; }))
-    .sort((a: MonitorEntry, b: MonitorEntry) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''));
-  const selectedMonitorEntry: MonitorEntry | null = monitorCarId ? activeEntries.find((e: MonitorEntry) => e.car.id === monitorCarId) ?? null : null;
-  const employeesList = employees.filter((e: Employee) => e.role === 'employee');
-  const activeByEmployee = employeesList.map((e: Employee) => ({ e, entries: activeEntries.filter((x: MonitorEntry) => x.car.assigned_employee_id === e.id) }));
-const handleTransfer = async (car: Car): Promise<void> => {
-    if (!transferEmpId || transferEmpId === car.assigned_employee_id) return;
-    setTransferMsg('');
-    const adminId = employees.find((e: Employee) => e.role === 'admin')?.id ?? null;
-    const res = await supabase.rpc('admin_transfer_car', { p_car_id: car.id, p_new_employee_id: transferEmpId, p_admin_id: adminId });
-    if (res.error || (res.data && (res.data as { ok?: boolean } | null)?.ok === false)) {
-      const up = await supabase.from('cars').update({ assigned_employee_id: transferEmpId }).eq('id', car.id);
-      if (up.error) { setTransferMsg('Nu am putut transfera mașina.'); return; }
-      const newEmp = employeesList.find((e: Employee) => e.id === transferEmpId);
-      await supabase.from('activity_log').insert({ employee_id: null, car_id: car.id, job_id: (car.jobs ?? []).find((j: Job) => j.status === 'in_lucru')?.id ?? null, action: 'transfer', detail: `Administratorul a transferat lucrarea de la ${employeeName(car.assigned_employee_id)} la ${newEmp?.name ?? '?'}` });
-    } else if (res.data && (res.data as { ok?: boolean }).ok === true) {
-      await supabase.from('activity_log').insert({ employee_id: transferEmpId, car_id: car.id, job_id: (car.jobs ?? []).find((j: Job) => j.status === 'in_lucru')?.id ?? null, action: 'transfer', detail: 'Administratorul a transferat lucrarea (istoric păstrat)' }).catch(() => undefined);
-    }
-    setTransferMsg('Mașina a fost transferată — timpul lucrat rămâne păstrat.');
-    setMonitorCarId(null); await onRefresh();
-  };
   const updateFinancial = async (car: Car, value: string): Promise<void> => {
     await supabase.from('cars').update({ financial_status: value }).eq('id', car.id);
   };
@@ -1322,6 +1499,7 @@ const handleTransfer = async (car: Car): Promise<void> => {
 </div>
 <button onClick={() => openReportModal(null)} className="flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold text-white shadow-sm" style={{ background: 'var(--button)' }}><FileBarChart size={16} /> GENEREAZĂ PDF</button>
 </div>
+<div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" size={18} /><input value={reportQuery} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReportQuery(e.target.value)} placeholder="Caută după număr, VIN sau client..." className="h-11 w-full rounded-lg border bg-[var(--surface)] pl-10 pr-4 text-sm outline-none" style={{ borderColor: SV.border }} /></div>
 <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
 {kpiCards.map((k) => <div key={k.label} className="flex items-center justify-between rounded-[14px] border p-5" style={{ borderColor: SV.border, background: k.bg }}>
 <div><p className="text-[13px] font-semibold" style={{ color: SV.sec }}>{k.label}</p><p className="mt-1.5 flex items-baseline gap-1.5"><span className="text-[26px] font-bold leading-none" style={{ color: SV.navy }}>{k.count}</span><span className="text-xs font-semibold" style={{ color: SV.muted }}>mașini</span></p></div>
@@ -1329,83 +1507,7 @@ const handleTransfer = async (car: Car): Promise<void> => {
 </div>)}
 </div>
 <div className="overflow-hidden rounded-[16px] border bg-[var(--surface)] shadow-sm" style={{ borderColor: SV.border }}><div className="border-b px-6 py-4" style={{ borderColor: SV.border }}><h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>Mașini finalizate ({finalizedCars.length})</h3></div><div className="hidden grid-cols-[1fr_1fr_1fr_1fr_1.2fr_1fr_1.2fr_60px] gap-4 border-b bg-[var(--surface-secondary)] px-6 py-3 text-[11px] font-bold uppercase tracking-[0.12em] sm:grid" style={{ borderColor: SV.border, color: SV.muted }}><span>Client</span><span>Mașină</span><span>Nr. Înm.</span><span>Data fin.</span><span>Angajat</span><span>Timp total</span><span>Status financiar</span><span className="text-right">PDF</span></div>{finalizedCars.length === 0 ? <div className="p-8 text-center text-sm" style={{ color: SV.sec }}>Nu există mașini finalizate.</div> : finalizedCars.map((car: Car) => <div key={car.id} className="grid grid-cols-1 gap-2 border-b px-6 py-4 last:border-0 sm:grid-cols-[1fr_1fr_1fr_1fr_1.2fr_1fr_1.2fr_60px] sm:items-center sm:gap-4" style={{ borderColor: SV.border }}><span className="text-sm font-semibold" style={{ color: SV.navy }}>{car.client_name}</span><span className="text-sm" style={{ color: SV.sec }}>{car.make} {car.model}</span><span className="text-sm font-bold" style={{ color: SV.navy }}>{car.license_plate}</span><span className="text-sm" style={{ color: SV.sec }}>{car.completed_at ? new Date(car.completed_at).toLocaleDateString('ro-RO') : '—'}</span>{(() => { const n = employeeName(car.assigned_employee_id); return <span className="flex min-w-0 items-center gap-2"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold" style={{ background: SV.lav, color: SV.purple }}>{n[0]}</span><span className="truncate text-sm font-medium" style={{ color: SV.navy }}>{n}</span></span>; })()}<span className="font-mono text-sm" style={{ color: 'var(--text-secondary)' }}>{formatShortDuration(totalWorkedSeconds(car.jobs))}</span><select defaultValue={car.financial_status} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => void updateFinancial(car, e.target.value)} className={`h-9 rounded-lg border px-2 text-xs font-bold ${financialStyles[car.financial_status as FinancialStatus] ?? 'border-[var(--border)] text-[var(--text-secondary)]'}`}>{financialOptions.map((f: FinancialStatus) => <option key={f} value={f}>{financialLabels[f]}</option>)}</select><button onClick={() => openReportModal(car)} className="justify-self-end rounded-lg p-1.5 transition hover:bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]" style={{ color: SV.purple }} title="Generează PDF"><FileText size={16} /></button></div>)}</div>
-<div className="grid gap-5 xl:grid-cols-2">
-<div className="rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}>
-<h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>În lucru ({inLucruCars.length})</h3>
-<p className="mt-1 text-xs" style={{ color: SV.muted }}>Monitorizare în timp real — timerul crește automat, fără refresh.</p>
-{activeEntries.length === 0 ? <p className="mt-4 py-4 text-center text-sm" style={{ color: SV.sec }}>Nu există lucrări active în acest moment.</p> : (
-<div className="mt-4 space-y-3">{activeEntries.map((en: MonitorEntry) => (
-<div key={en.job.id}>
-<button onClick={() => { setMonitorCarId(monitorCarId === en.car.id ? null : en.car.id); setTransferMsg(''); }} className="flex w-full items-center justify-between rounded-xl border p-3.5 text-left transition hover:shadow-sm" style={{ borderColor: monitorCarId === en.car.id ? SV.purple : SV.border, background: monitorCarId === en.car.id ? 'color-mix(in srgb, var(--primary) 6%, transparent)' : 'transparent' }}>
-<div className="flex min-w-0 items-center gap-3">
-<span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold" style={{ background: SV.lav, color: SV.purple }}>{(en.car.client_name || '?')[0]}</span>
-<div className="min-w-0">
-<p className="truncate text-sm font-bold" style={{ color: SV.navy }}>{en.car.license_plate} — {en.car.make} {en.car.model}</p>
-<p className="truncate text-xs" style={{ color: SV.sec }}>Client: {en.car.client_name}</p>
-<p className="mt-0.5 truncate text-xs" style={{ color: SV.sec }}>{en.emp} • {en.job.title}</p>
-</div>
-</div>
-<div className="flex shrink-0 flex-col items-end gap-1">
-<span className="font-mono text-sm font-bold" style={{ color: SV.purple }}>⏱ {fmtHMS(en.totalSec)}</span>
-<Badge value="in_lucru" compact />
-</div>
-</button>
-{monitorCarId === en.car.id && (
-<div className="mt-2 rounded-xl border p-4" style={{ borderColor: SV.border, background: 'var(--surface-secondary)' }}>
-<div className="grid gap-2 text-xs" style={{ color: SV.sec }}>
-<p><span className="font-bold" style={{ color: SV.navy }}>Mașină:</span> {en.car.make} {en.car.model} ({en.car.license_plate})</p>
-<p><span className="font-bold" style={{ color: SV.navy }}>Client:</span> {en.car.client_name}</p>
-<p><span className="font-bold" style={{ color: SV.navy }}>Lucrare:</span> {en.job.title}</p>
-<p><span className="font-bold" style={{ color: SV.navy }}>Angajat:</span> {en.emp}</p>
-<p><span className="font-bold" style={{ color: SV.navy }}>Ora pornirii:</span> {en.startedAt ? new Date(en.startedAt).toLocaleTimeString('ro-RO') : '—'}</p>
-<p><span className="font-bold" style={{ color: SV.navy }}>Timp normal:</span> <span className="font-mono">{fmtHMS(en.normalSec)}</span></p>
-<p><span className="font-bold" style={{ color: SV.navy }}>Timp peste program:</span> <span className="font-mono">{fmtHMS(en.overtimeSec)}</span></p>
-<p><span className="font-bold" style={{ color: SV.navy }}>Timp total:</span> <span className="font-mono">{fmtHMS(en.totalSec)}</span> (live)</p>
-<p><span className="font-bold" style={{ color: SV.navy }}>Status:</span> ÎN LUCRU</p>
-</div>
-<div className="mt-3 border-t pt-3" style={{ borderColor: SV.border }}>
-<p className="text-xs font-bold" style={{ color: SV.navy }}>Schimbă angajatul</p>
-<div className="mt-2 flex flex-wrap items-center gap-2">
-<select value={transferEmpId} onChange={(e) => setTransferEmpId(e.target.value)} className="rounded-lg border px-2 py-1.5 text-xs" style={{ borderColor: SV.border, background: 'var(--surface)', color: SV.navy }}>
-<option value="">— selectează angajat —</option>
-{employeesList.map((e: Employee) => <option key={e.id} value={e.id}>{e.name}</option>)}
-</select>
-<button onClick={() => void handleTransfer(en.car)} className="rounded-lg px-3 py-1.5 text-xs font-bold text-white" style={{ background: 'var(--button)' }}>Transferă</button>
-</div>
-{transferMsg && <p className="mt-2 text-xs" style={{ color: SV.sec }}>{transferMsg}</p>}
-<p className="mt-1 text-[11px]" style={{ color: SV.muted }}>Timpul deja lucrat rămâne păstrat în istoricul lucrării.</p>
-</div>
-</div>
-)}
-</div>
-))}</div>
-)}
-<div className="mt-5 border-t pt-4" style={{ borderColor: SV.border }}>
-<h4 className="text-xs font-bold uppercase tracking-[0.12em]" style={{ color: SV.muted }}>Situația angajaților</h4>
-<div className="mt-3 space-y-2">{activeByEmployee.map(({ e, entries }: { e: Employee; entries: MonitorEntry[] }) => (
-<div key={e.id} className="flex items-center justify-between rounded-lg border px-3 py-2" style={{ borderColor: SV.border }}>
-<span className="flex min-w-0 items-center gap-2"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold" style={{ background: SV.lav, color: SV.purple }}>{e.name[0]}</span><span className="truncate text-xs font-semibold" style={{ color: SV.navy }}>{e.name}</span></span>
-{entries.length === 0 ? <span className="text-xs font-semibold" style={{ color: 'var(--success)' }}>Liber</span> : (
-<span className="flex min-w-0 flex-col items-end">
-{entries.map((x: MonitorEntry) => <span key={x.job.id} className="truncate text-[11px]" style={{ color: SV.sec }}>{x.car.license_plate} • {x.job.title} • <span className="font-mono">{fmtHMS(x.totalSec)}</span></span>)}
-</span>
-)}
-</div>
-))}</div>
-</div>
-</div>
-<div className="rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}>
-<h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>Așteptare piese ({partsCars.length})</h3>
-<div className="mt-4 space-y-3">{partsCars.length === 0 ? <p className="py-4 text-center text-sm" style={{ color: SV.sec }}>Nu există mașini în așteptarea pieselor.</p> : partsCars.map((car: Car) => { const partsJob = car.jobs?.find((j: Job) => j.status === 'asteptare_piese'); return <div key={car.id} className="flex items-center justify-between rounded-xl border p-3.5" style={{ borderColor: SV.border }}>
-<div className="flex min-w-0 items-center gap-3">
-<span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold" style={{ background: SV.lav, color: SV.purple }}>{(car.client_name || '?')[0]}</span>
-<div className="min-w-0"><p className="truncate text-sm font-bold" style={{ color: SV.navy }}>{car.client_name}</p><p className="truncate text-xs" style={{ color: SV.sec }}>{car.make} {car.model} • {car.license_plate}</p><p className="mt-0.5 truncate text-xs" style={{ color: SV.muted }}>{partsJob?.title ?? '—'} • {employeeName(car.assigned_employee_id)}</p></div>
-</div>
-<Badge value="asteptare_piese" compact />
-</div>; })}</div>
-</div>
-</div>
-<p className="pt-2 pb-4 text-center text-xs" style={{ color: SV.muted }}>Rapoartele sunt actualizate în timp real.</p>
+<p className="pt-2 pb-4 text-center text-xs" style={{ color: SV.muted }}>Rapoartele sunt disponibile pentru analiză și istoric.</p>
 {showGenerate && <Modal title={`Generează PDF — ${selectedReportCar ? selectedReportCar.license_plate : 'all cars'}`} onClose={() => setShowGenerate(false)}>
 <div className="space-y-5 p-6">
 <p className="rounded-lg border px-3 py-2 text-xs" style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>Raport pentru: {selectedReportCar ? `${selectedReportCar.license_plate} (${selectedReportCar.make ?? ''} ${selectedReportCar.model ?? ''})` : 'toate mașinile'}</p>

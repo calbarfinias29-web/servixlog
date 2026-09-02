@@ -262,7 +262,9 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
     const S = new Date(job.started_at).getTime();
     return {
       worked_seconds: job.worked_seconds + overlapSeconds(schedule, S, nowMs, 'normal'),
-      overtime_seconds: (job.overtime_seconds ?? 0) + overlapSeconds(schedule, S, nowMs, job.is_overtime ? 'ot' : 'normal'),
+      // FIX dublare: overtime_seconds primește DOAR segmentul overtime explicit.
+      // Înainte se adăuga și overlap-ul normal aici → timpul normal dublat în overtime.
+      overtime_seconds: (job.overtime_seconds ?? 0) + (job.is_overtime ? overlapSeconds(schedule, S, nowMs, 'ot') : 0),
     };
   };
 // După o finalizare efectivă a unei lucrări, sincronizează cars.completed_at
