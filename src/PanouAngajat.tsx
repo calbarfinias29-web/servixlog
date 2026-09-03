@@ -1,8 +1,10 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react';
-import { Home, CarFront, Wrench, History, UserRound, Clock3, Pause, Clock, Check, CheckCircle2, Play, Info, LogOut, X, Users, CalendarClock, FileBarChart, Settings } from 'lucide-react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Home, CarFront, Wrench, History, UserRound, Clock3, Pause, Clock, Check, CheckCircle2, Play, Info, LogOut, X, Users, CalendarClock, FileBarChart, Settings, Search } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { VehicleImage } from '@/components/VehicleImage';
-import type { Car, Employee, Job, JobStatus, Schedule, ScheduleDay } from '@/types';
+import { searchIncludes } from '@/lib/search';
+import { EmployeeJobDetailsModal } from '@/components/JobDetailsModal';
+import type { Car, Employee, Job, JobStatus, Rates, Schedule, ScheduleDay } from '@/types';
 
 const C = {
   bg: '#0D0B14', card: '#181622', card2: '#1F1D2B',
@@ -187,6 +189,22 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
   const [showDetails, setShowDetails] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
+  // === ISTORIC MAȘINI FINALIZATE (per angajat) ===
+  const [histQuery, setHistQuery] = useState('');
+  const [histPeriod, setHistPeriod] = useState<'7z' | 'luna' | 'toate'>('luna');
+  const [histDetails, setHistDetails] = useState<{ car: Car; job: Job } | null>(null);
+  const [rates, setRates] = useState<Rates | null>(null);
+  // Tarife DOAR pentru calculul costurilor din panoul de detalii (citire, ca în Admin).
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data, error: rErr } = await supabase.from('rates').select('*').order('id').limit(1);
+        if (!cancelled && !rErr && data?.[0]) setRates(data[0] as Rates);
+      } catch { /* tarife indisponibile: panoul de detalii rămâne fără calcul cost */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
   useEffect(() => { const i = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(i); }, []);
 
   // === SINCRONIZARE EVENIMENTE AUTOMATE (Manual/Automat per angajat) ===
@@ -433,6 +451,45 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
   const availableCars = useMemo(() => cars.filter((c) => getCarStatus(c.jobs ?? []) !== 'finalizat' && (!c.assigned_employee_id || c.assigned_employee_id === employee.id)), [cars, employee.id]);
   const allMyJobs = useMemo(() => myCars.flatMap((c) => (c.jobs ?? []).map((j) => ({ car: c, job: j }))), [myCars]);
 
+  // === ISTORIC: mașini FINALIZATE ale angajatului conectat ===
+  // Sursa de adevăr = mecanismul existent din aplicație: alocarea muncii este
+  // la nivel de MAȘINĂ (cars.assigned_employee_id), nu la nivel de job —
+  // același criteriu folosit de myCars / Dashboard / rapoarte. Timerele
+  // rămân pe jobs. Filtrarea se face pe employee.id din CONTEXTUL REAL de
+  // autentificare (nu query string, nu localStorage) — fiecare angajat vede
+  // DOAR mașinile lui finalizate.
+  const myFinalizedCars = useMemo(
+    () => cars.filter((c) => c.assigned_employee_id === employee.id && getCarStatus(c.jobs ?? []) === 'finalizat'),
+    [cars, employee.id]
+  );
+
+  const HIST_PERIODS: Array<{ key: '7z' | 'luna' | 'toate'; label: string; ms: number | null }> = [
+    { key: '7z', label: 'Ultimele 7 zile', ms: 7 * 24 * 3600 * 1000 },
+    { key: 'luna', label: 'Ultima lună', ms: 30 * 24 * 3600 * 1000 },
+    { key: 'toate', label: 'Toate', ms: null },
+  ];
+
+  const histInPeriod = useCallback((ts: string | null): boolean => {
+    if (!ts) return false;
+    const p = HIST_PERIODS.find((x) => x.key === histPeriod);
+    if (!p || p.ms === null) return true;
+    // Perioada se calculează pe DATA REALĂ de finalizare (cars.completed_at)
+    return new Date(ts).getTime() >= Date.now() - p.ms;
+  }, [histPeriod]);
+
+  // Căutare flexibilă cu helperul EXISTENT (src/lib/search.ts): case-insensitive,
+  // fără diacritice, fără spații. Caută pe: număr, marcă, model, VIN, client,
+  // telefon și titlurile lucrărilor.
+  const histCars = useMemo(() => myFinalizedCars
+    .filter((c) => histInPeriod(c.completed_at))
+    .filter((c) => {
+      if (!histQuery.trim()) return true;
+      const fields = [c.license_plate, c.make, c.model, c.vin, c.client_name, c.client_phone, ...(c.jobs ?? []).map((j) => j.title)];
+      return fields.some((f) => searchIncludes(f, histQuery));
+    })
+    .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? '')),
+  [myFinalizedCars, histInPeriod, histQuery]);
+
   // === SESIUNI ACTIVE (toți angajații, din date persistente) ===
   // Un angajat are sesiune activă dacă are vreun job 'in_lucru'. Timpul nu
   // depinde de angajatul afișat: fiecare sesiune trăiește în DB (started_at).
@@ -672,14 +729,78 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
               </div>
             </Card>}
 
-            {/* ISTORIC — real */}
-            {view === 'istoric' && <Card title="Istoric lucrări finalizate">
-              {allMyJobs.filter((x) => x.job.status === 'finalizat').length === 0 && <div className="py-4 text-[13px]" style={{ color: 'var(--text-secondary)' }}>Istoric gol.</div>}
-              <div className="space-y-2">
-                {allMyJobs.filter((x) => x.job.status === 'finalizat').map(({ car, job }) => <div key={job.id} className="flex items-center justify-between rounded-lg border p-3" style={{ borderColor: 'var(--border)', background: 'var(--card)' }}>
-                  <span><span className="block text-[14px] font-bold" style={{ color: 'var(--text-primary)' }}>{job.title}</span><span className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>{car.license_plate}</span></span>
-                  <span className="text-[12px]" style={{ color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>{fmt(job.worked_seconds)}{job.completed_at ? ` · ${new Date(job.completed_at).toLocaleDateString('ro-RO')}` : ''}</span>
-                </div>)}
+            {/* ISTORIC — real: mașini FINALIZATE ale angajatului conectat */}
+            {view === 'istoric' && <Card title="Istoric mașini finalizate">
+              {/* PERIOADA + LUPĂ */}
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap gap-1.5">
+                  {HIST_PERIODS.map((p) => (
+                    <button key={p.key} onClick={() => setHistPeriod(p.key)}
+                      className="rounded-lg px-3 py-1.5 text-[11px] font-bold transition active:scale-[0.98]"
+                      style={histPeriod === p.key
+                        ? { background: 'var(--primary)', color: '#fff' }
+                        : { border: '1px solid var(--border)', color: 'var(--text-secondary)', background: 'var(--card)' }}>
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="relative min-w-[160px] flex-1 sm:ml-auto sm:max-w-xs">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2" size={14} style={{ color: 'var(--text-secondary)' }} />
+                  <input
+                    value={histQuery}
+                    onChange={(e) => setHistQuery(e.target.value)}
+                    placeholder="Caută: număr, lucrare, VIN, telefon, client, marcă..."
+                    className="h-9 w-full rounded-lg border pl-9 pr-8 text-[12px] outline-none focus:border-[var(--primary)]"
+                    style={{ borderColor: 'var(--border)', background: 'var(--card)', color: 'var(--text-primary)' }}
+                  />
+                  {histQuery && (
+                    <button onClick={() => setHistQuery('')} title="Șterge căutarea" className="absolute right-2 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-secondary)' }}>
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* EMPTY STATES */}
+              {myFinalizedCars.length === 0 && <div className="py-4 text-[13px]" style={{ color: 'var(--text-secondary)' }}>Nu ai lucrări finalizate în perioada selectată.</div>}
+              {myFinalizedCars.length > 0 && histCars.length === 0 && <div className="py-4 text-[13px]" style={{ color: 'var(--text-secondary)' }}>Nu am găsit rezultate pentru căutarea ta.</div>}
+
+              {/* LISTA MAȘINILOR FINALIZATE */}
+              <div className="space-y-3">
+                {histCars.map((car) => (
+                  <div key={car.id} className="rounded-lg border p-3" style={{ borderColor: 'var(--border)', background: 'var(--card)' }}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="block text-[14px] font-bold" style={{ color: 'var(--text-primary)' }}>{car.license_plate}</span>
+                        <span className="block text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+                          {[
+                            [car.make, car.model].filter(Boolean).join(' '),
+                            car.client_name,
+                            car.completed_at ? new Date(car.completed_at).toLocaleDateString('ro-RO') : null,
+                          ].filter(Boolean).join(' · ')}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="mt-2 space-y-1.5">
+                      {(car.jobs ?? []).map((job) => (
+                        <div key={job.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-2.5 py-2" style={{ borderColor: 'var(--border)' }}>
+                          <span className="min-w-0">
+                            <span className="block truncate text-[13px] font-semibold" style={{ color: 'var(--text-primary)' }}>{job.title}</span>
+                            <span className="block text-[11px] font-mono" style={{ color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
+                              {fmt(job.worked_seconds)}{job.overtime_seconds > 0 ? ` +${fmt(job.overtime_seconds)}` : ''}{job.completed_at ? ` · ${new Date(job.completed_at).toLocaleDateString('ro-RO')}` : ''}
+                            </span>
+                          </span>
+                          <button
+                            onClick={() => setHistDetails({ car, job })}
+                            className="flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold text-white transition active:scale-[0.98] hover:brightness-110"
+                            style={{ background: 'var(--primary)' }}>
+                            <Info size={12} /> Detalii
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             </Card>}
 
@@ -762,6 +883,17 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
             })}
           </div>
         </div>
+      )}
+
+      {/* OVERLAY DETALII LUCRARE (Angajat) — identic cu Admin, FĂRĂ PDF */}
+      {histDetails && (
+        <EmployeeJobDetailsModal
+          job={histDetails.job}
+          car={histDetails.car}
+          rates={rates}
+          employeeName={() => employee.name}
+          onClose={() => setHistDetails(null)}
+        />
       )}
 
       {/* OVERLAY ALEGE ALTĂ MAȘINĂ — real */}

@@ -16,6 +16,10 @@ import { VEHICLE_MAKES, modelsFor } from '@/lib/vehicleCatalog';
 import ServiceDarkDashboard from '@/ServiceDarkDashboard';
 import { EmployeeReportsTab } from '@/EmployeeReportsTab';
 import { normalizeSearch, searchIncludes } from '@/lib/search';
+import { Modal, IconButton } from '@/components/Modal';
+import { formatShortDuration } from '@/lib/format';
+import { computeJobCost } from '@/lib/costs';
+import { JobDetailsBody } from '@/components/JobDetailsModal';
 import { CatalogAutocomplete, type CatalogOption } from '@/components/CatalogAutocomplete';
 
 let catalogFieldOptions: { makes: CatalogOption[]; models: CatalogOption[]; works: CatalogOption[] } = { makes: [], models: [], works: [] };
@@ -69,11 +73,6 @@ function formatDuration(seconds: number): string {
   const minutes = Math.floor((seconds % 3600) / 60);
   const secs = seconds % 60;
   return `${hours}h ${minutes.toString().padStart(2, '0')}m ${secs.toString().padStart(2, '0')}s`;
-}
-function formatShortDuration(seconds: number): string {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  return hours ? `${hours}h ${minutes.toString().padStart(2, '0')}m` : `${minutes}m`;
 }
 function formatTimer(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -168,13 +167,6 @@ function clearTheme(): void {
 function Badge({ value, compact = false }: { value: string; compact?: boolean }) {
   return <span className={`inline-flex items-center rounded-md font-semibold tracking-[0.08em] ${compact ? 'px-2 py-1 text-[10px]' : 'px-2.5 py-1.5 text-[11px]'} ${statusStyles[value] ?? 'bg-[var(--border)] text-[var(--text-secondary)]'}`}>{statusLabels[value as keyof typeof statusLabels] ?? value}</span>;
 }
-function IconButton({ label, onClick, children, tone = 'default' }: { label: string; onClick?: () => void; children: React.ReactNode; tone?: 'default' | 'danger' }) {
-  return <button aria-label={label} onClick={onClick} className={`rounded-lg p-2 transition-colors ${tone === 'danger' ? 'text-[var(--text-secondary)] hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] hover:text-[var(--danger)]' : 'text-[var(--text-secondary)] hover:bg-[var(--border)] hover:text-[var(--text-primary)]'}`}>{children}</button>;
-}
-function Modal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"><div className={`max-h-[90vh] ${wide ? 'max-w-4xl' : 'max-w-2xl'} w-full overflow-auto rounded-2xl bg-[var(--surface)] shadow-2xl`}><div className="flex items-center justify-between border-b border-[var(--border)] px-6 py-5"><div><p className="text-[11px] font-bold uppercase tracking-[0.2em]" style={{ color: 'var(--primary)' }}>SERVIX</p><h2 className="mt-1 text-xl font-bold text-[var(--text-primary)]">{title}</h2></div><IconButton label="Închide" onClick={onClose}><X size={20} /></IconButton></div>{children}</div></div>;
-}
-
 // ============================================================
 // LANDING
 // ============================================================
@@ -1092,68 +1084,11 @@ function JobsView({ cars, employees, rates, employeeName, onShowCar, onRefresh, 
 // ADMIN JOB DETAILS PANEL
 // ============================================================
 function AdminJobDetailsModal({ job, car, rates, employeeName, onClose, onShowCar }: { job: Job; car: Car; rates: Rates | null; employeeName: (id: string | null) => string; onClose: () => void; onShowCar: (car: Car) => void }) {
-  // FIX: worked_seconds conține DOAR timp normal (nu se scade overtime_seconds)
-  const normalSec = job.worked_seconds;
-  const overtimeSec = job.overtime_seconds ?? 0;
-  const finalizedCost = job.status === 'finalizat' ? computeJobCost(job, car, rates) : null;
-  const vatRate = rates?.vat_rate ?? 21;
-  const vatAmount = finalizedCost ? (finalizedCost.totalCost * vatRate) / 100 : 0;
-  const totalWithVat = finalizedCost ? finalizedCost.totalCost + vatAmount : 0;
-  const fmtDateTime = (ts: string | null) => ts ? new Date(ts).toLocaleString('ro-RO', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
-  const Section = ({ title, children }: { title: string; children: React.ReactNode }) => <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4"><p className="mb-3 text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: 'var(--primary)' }}>{title}</p>{children}</div>;
-  const Row = ({ label, value }: { label: string; value: React.ReactNode }) => <div className="flex items-baseline justify-between gap-4 py-1"><span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>{label}</span><span className="text-right text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{value}</span></div>;
-  // Totaluri evidențiate vizual - TOTAL FĂRĂ TVA = ROȘU, TOTAL CU TVA = VERDE
-  const TotalRowRed = ({ label, value }: { label: string; value: React.ReactNode }) => <div className="flex items-baseline justify-between gap-4 py-1.5"><span className="text-sm font-bold" style={{ color: '#EF4444' }}>{label}</span><span className="text-right text-lg font-bold" style={{ color: '#EF4444' }}>{value}</span></div>;
-  const TotalRowGreen = ({ label, value }: { label: string; value: React.ReactNode }) => <div className="flex items-baseline justify-between gap-4 py-1.5"><span className="text-sm font-bold" style={{ color: '#22C55E' }}>{label}</span><span className="text-right text-lg font-bold" style={{ color: '#22C55E' }}>{value}</span></div>;
+  // Corpul panoului este componenta comună JobDetailsBody (identică pentru Admin
+  // și Angajat). Adminul păstrează PDF-ul și navigarea „Deschide mașina".
   return <Modal title={`Detalii lucrare — ${car.license_plate}`} onClose={onClose} wide>
     <div className="space-y-4 p-6">
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Section title="Mașină">
-          <Row label="Număr înmatriculare" value={car.license_plate} />
-          <Row label="Marcă / Model" value={`${car.make ?? '—'}${car.model ? ` ${car.model}` : ''}`} />
-          <Row label="An" value={car.year ?? '—'} />
-          <Row label="Proprietar" value={car.client_name} />
-          <Row label="Telefon" value={car.client_phone ?? '—'} />
-        </Section>
-        <Section title="Lucrare">
-          <Row label="Denumire" value={job.title} />
-          <Row label="Status" value={job.status === 'finalizat' ? 'Finalizat' : job.status === 'in_lucru' ? 'În lucru' : job.status === 'asteptare_piese' ? 'Așteptare piese' : 'Disponibil'} />
-          <Row label="Început" value={fmtDateTime(job.started_at)} />
-          <Row label="Finalizat" value={fmtDateTime(job.completed_at)} />
-        </Section>
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Section title="Angajați">
-          <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold" style={{ background: 'color-mix(in srgb, var(--primary) 12%, transparent)', color: 'var(--primary)' }}>{(employeeName(car.assigned_employee_id) || '?')[0]}</span>
-            <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{employeeName(car.assigned_employee_id) || '—'}</span>
-          </div>
-        </Section>
-        <Section title="Timp lucrat">
-          {/* FIX: worked_seconds = DOAR timp normal, overtime_seconds = DOAR peste program */}
-          <Row label="Ore normale" value={formatShortDuration(normalSec)} />
-          <Row label="Ore suplimentare" value={formatShortDuration(overtimeSec)} />
-          <Row label="Timp total" value={formatShortDuration(normalSec + overtimeSec)} />
-          <Row label="worked_seconds (normal)" value={<span className="font-mono">{job.worked_seconds}s</span>} />
-          <Row label="overtime_seconds" value={<span className="font-mono">{overtimeSec}s</span>} />
-        </Section>
-      </div>
-      {finalizedCost && <Section title="Calcul cost">
-        <Row label="Tarif orar normal" value={`${finalizedCost.normalRate.toFixed(2)} lei/oră`} />
-        <Row label="Ore normale" value={formatShortDuration(finalizedCost.normalSec)} />
-        <Row label="Cost ore normale" value={`${finalizedCost.normalCost.toFixed(2)} lei`} />
-        <Row label="Tarif orar suplimentar" value={`${finalizedCost.overtimeRate.toFixed(2)} lei/oră`} />
-        <Row label="Ore suplimentare" value={formatShortDuration(finalizedCost.overtimeSec)} />
-        <Row label="Cost ore suplimentare" value={`${finalizedCost.overtimeCost.toFixed(2)} lei`} />
-        <div className="my-2 border-t" style={{ borderColor: 'var(--border)' }} />
-        <Row label="TVA" value={`${vatRate.toFixed(2)}%`} />
-        <Row label="Valoare TVA" value={`${vatAmount.toFixed(2)} lei`} />
-        <div className="my-2 border-t" style={{ borderColor: 'var(--border)' }} />
-        <TotalRowRed label="TOTAL FĂRĂ TVA" value={`${finalizedCost.totalCost.toFixed(2)} lei`} />
-        <TotalRowGreen label="TOTAL CU TVA" value={`${totalWithVat.toFixed(2)} lei`} />
-      </Section>}
-      {job.description && <Section title="Descriere lucrare"><p className="text-sm" style={{ color: 'var(--text-primary)' }}>{job.description}</p></Section>}
-      {car.notes && <Section title="Observații mașină"><p className="text-sm" style={{ color: 'var(--text-primary)' }}>{car.notes}</p></Section>}
+      <JobDetailsBody job={job} car={car} rates={rates} employeeName={employeeName} />
       <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--border)] pt-4">
         <button onClick={onClose} className="rounded-lg border border-[var(--border)] px-4 py-2.5 text-sm font-bold transition hover:bg-[var(--surface-secondary)]" style={{ color: 'var(--text-secondary)' }}>Închide</button>
         <button onClick={() => generateReportPdf(`servix_raport_lucrare_${slugify(car.license_plate)}_${slugify(job.title)}.pdf`, buildSingleJobReportLines(job, car, rates, employeeName))} className="flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold text-white transition hover:brightness-110" style={{ background: 'var(--button)' }}><FileText size={16} /> GENEREAZĂ RAPORT PDF</button>
@@ -1343,18 +1278,6 @@ function jobOccurrenceYear(job: Job): number {
  * Calcuierea costului manoperei pentru O SINGURA lucrare, folosind exact
  * mecanismul existent din buildCarReportLines (tarife normale/garanție/supl.).
  */
-function computeJobCost(job: Job, car: Car, rates: Rates | null): { normalSec: number; overtimeSec: number; normalRate: number; overtimeRate: number; normalCost: number; overtimeCost: number; totalSec: number; totalCost: number } {
-  // FIX: worked_seconds conține DOAR timp normal (nu se scade overtime_seconds)
-  const normalSec = job.worked_seconds;
-  const overtimeSec = job.overtime_seconds ?? 0;
-  const normalRate = car.is_warranty ? (rates?.warranty_rate ?? 0) : (rates?.normal_rate ?? 100);
-  const overtimeRate = rates?.overtime_rate ?? 150;
-  const normalCost = (normalSec / 3600) * normalRate;
-  const overtimeCost = (overtimeSec / 3600) * overtimeRate;
-  // FIX: totalSec = timp normal + timp peste program (nu doar worked_seconds)
-  return { normalSec, overtimeSec, normalRate, overtimeRate, normalCost, overtimeCost, totalSec: normalSec + overtimeSec, totalCost: normalCost + overtimeCost };
-}
-
 /** Colecteaza toate aparitiile lucrarilor din toate masinile, sortate pe an. */
 function collectJobOccurrences(cars: Car[], rates: Rates | null, employeeName: (id: string | null) => string): JobOccurrence[] {
   const out: JobOccurrence[] = [];
