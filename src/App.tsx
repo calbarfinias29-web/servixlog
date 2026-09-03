@@ -97,7 +97,8 @@ function totalOvertimeSeconds(jobs: Job[] | undefined): number {
   return (jobs ?? []).reduce((sum: number, j: Job) => sum + (j.overtime_seconds ?? 0), 0);
 }
 function normalWorkedSeconds(jobs: Job[] | undefined): number {
-  return (jobs ?? []).reduce((sum: number, j: Job) => sum + (j.worked_seconds - (j.overtime_seconds ?? 0)), 0);
+  // FIX: worked_seconds conține DOAR timp normal (nu se scade overtime_seconds)
+  return (jobs ?? []).reduce((sum: number, j: Job) => sum + j.worked_seconds, 0);
 }
 function formatMileage(km: number | null): string {
   if (km == null) return '—';
@@ -294,7 +295,8 @@ function EmployeePanel({ employee, cars, schedule, rates, employees, onRefresh, 
   const breakActive = isInBreak(schedule, new Date(now));
   const liveSeconds = activeJob?.started_at ? Math.max(0, Math.floor((now - new Date(activeJob.started_at).getTime()) / 1000)) : 0;
   const isOvertimeActive = Boolean(activeJob?.is_overtime) && Boolean(activeJob?.started_at);
-  const normalSeconds = activeJob ? (breakActive ? activeJob.worked_seconds - (activeJob.overtime_seconds ?? 0) : (isOvertimeActive ? activeJob.worked_seconds - (activeJob.overtime_seconds ?? 0) : activeJob.worked_seconds + liveSeconds - (activeJob.overtime_seconds ?? 0))) : 0;
+  // FIX: worked_seconds conține DOAR timp normal (nu se scade overtime_seconds)
+  const normalSeconds = activeJob ? (breakActive ? activeJob.worked_seconds : (isOvertimeActive ? activeJob.worked_seconds : activeJob.worked_seconds + liveSeconds)) : 0;
   const overtimeLiveSeconds = isOvertimeActive ? liveSeconds : 0;
   const overtimeTotalSeconds = (activeJob?.overtime_seconds ?? 0) + overtimeLiveSeconds;
   // „Timp total” = DOAR timpul normal (worked_seconds + live normal).
@@ -1090,7 +1092,8 @@ function JobsView({ cars, employees, rates, employeeName, onShowCar, onRefresh, 
 // ADMIN JOB DETAILS PANEL
 // ============================================================
 function AdminJobDetailsModal({ job, car, rates, employeeName, onClose, onShowCar }: { job: Job; car: Car; rates: Rates | null; employeeName: (id: string | null) => string; onClose: () => void; onShowCar: (car: Car) => void }) {
-  const normalSec = job.worked_seconds - (job.overtime_seconds ?? 0);
+  // FIX: worked_seconds conține DOAR timp normal (nu se scade overtime_seconds)
+  const normalSec = job.worked_seconds;
   const overtimeSec = job.overtime_seconds ?? 0;
   const finalizedCost = job.status === 'finalizat' ? computeJobCost(job, car, rates) : null;
   const vatRate = rates?.vat_rate ?? 21;
@@ -1099,6 +1102,9 @@ function AdminJobDetailsModal({ job, car, rates, employeeName, onClose, onShowCa
   const fmtDateTime = (ts: string | null) => ts ? new Date(ts).toLocaleString('ro-RO', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
   const Section = ({ title, children }: { title: string; children: React.ReactNode }) => <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4"><p className="mb-3 text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: 'var(--primary)' }}>{title}</p>{children}</div>;
   const Row = ({ label, value }: { label: string; value: React.ReactNode }) => <div className="flex items-baseline justify-between gap-4 py-1"><span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>{label}</span><span className="text-right text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{value}</span></div>;
+  // Totaluri evidențiate vizual - TOTAL FĂRĂ TVA = ROȘU, TOTAL CU TVA = VERDE
+  const TotalRowRed = ({ label, value }: { label: string; value: React.ReactNode }) => <div className="flex items-baseline justify-between gap-4 py-1.5"><span className="text-sm font-bold" style={{ color: '#EF4444' }}>{label}</span><span className="text-right text-lg font-bold" style={{ color: '#EF4444' }}>{value}</span></div>;
+  const TotalRowGreen = ({ label, value }: { label: string; value: React.ReactNode }) => <div className="flex items-baseline justify-between gap-4 py-1.5"><span className="text-sm font-bold" style={{ color: '#22C55E' }}>{label}</span><span className="text-right text-lg font-bold" style={{ color: '#22C55E' }}>{value}</span></div>;
   return <Modal title={`Detalii lucrare — ${car.license_plate}`} onClose={onClose} wide>
     <div className="space-y-4 p-6">
       <div className="grid gap-4 sm:grid-cols-2">
@@ -1124,10 +1130,11 @@ function AdminJobDetailsModal({ job, car, rates, employeeName, onClose, onShowCa
           </div>
         </Section>
         <Section title="Timp lucrat">
-          <Row label="Timp total" value={formatShortDuration(job.worked_seconds)} />
+          {/* FIX: worked_seconds = DOAR timp normal, overtime_seconds = DOAR peste program */}
           <Row label="Ore normale" value={formatShortDuration(normalSec)} />
           <Row label="Ore suplimentare" value={formatShortDuration(overtimeSec)} />
-          <Row label="worked_seconds" value={<span className="font-mono">{job.worked_seconds}s</span>} />
+          <Row label="Timp total" value={formatShortDuration(normalSec + overtimeSec)} />
+          <Row label="worked_seconds (normal)" value={<span className="font-mono">{job.worked_seconds}s</span>} />
           <Row label="overtime_seconds" value={<span className="font-mono">{overtimeSec}s</span>} />
         </Section>
       </div>
@@ -1139,10 +1146,11 @@ function AdminJobDetailsModal({ job, car, rates, employeeName, onClose, onShowCa
         <Row label="Ore suplimentare" value={formatShortDuration(finalizedCost.overtimeSec)} />
         <Row label="Cost ore suplimentare" value={`${finalizedCost.overtimeCost.toFixed(2)} lei`} />
         <div className="my-2 border-t" style={{ borderColor: 'var(--border)' }} />
-        <Row label="Subtotal fără TVA" value={`${finalizedCost.totalCost.toFixed(2)} lei`} />
         <Row label="TVA" value={`${vatRate.toFixed(2)}%`} />
         <Row label="Valoare TVA" value={`${vatAmount.toFixed(2)} lei`} />
-        <Row label="TOTAL CU TVA" value={`${totalWithVat.toFixed(2)} lei`} />
+        <div className="my-2 border-t" style={{ borderColor: 'var(--border)' }} />
+        <TotalRowRed label="TOTAL FĂRĂ TVA" value={`${finalizedCost.totalCost.toFixed(2)} lei`} />
+        <TotalRowGreen label="TOTAL CU TVA" value={`${totalWithVat.toFixed(2)} lei`} />
       </Section>}
       {job.description && <Section title="Descriere lucrare"><p className="text-sm" style={{ color: 'var(--text-primary)' }}>{job.description}</p></Section>}
       {car.notes && <Section title="Observații mașină"><p className="text-sm" style={{ color: 'var(--text-primary)' }}>{car.notes}</p></Section>}
@@ -1227,7 +1235,8 @@ function ChangeJobAllocationModal({ job, car, employees, employeeName, onSaved, 
 function buildCarReportLines(car: Car, rates: Rates | null, plateHistory: PlateHistoryEntry[], mileageLog: MileageLogEntry[], empName: string): PdfLine[] {
   const overtimeSec = totalOvertimeSeconds(car.jobs);
   const totalSec = totalWorkedSeconds(car.jobs);
-  const normalSec = totalSec - overtimeSec;
+  // FIX: worked_seconds conține DOAR timp normal (nu se scade overtime_seconds)
+  const normalSec = totalSec;
   const normalRate = car.is_warranty ? (rates?.warranty_rate ?? 0) : (rates?.normal_rate ?? 100);
   const overtimeRate = rates?.overtime_rate ?? 150;
   const normalCost = (normalSec / 3600) * normalRate;
@@ -1251,14 +1260,15 @@ function buildCarReportLines(car: Car, rates: Rates | null, plateHistory: PlateH
   } else {
     for (const j of jobs) {
       lines.push({ text: `- ${j.title} [${statusLabels[j.status]}]`, size: 10.5, bold: false });
-      lines.push(pdfRow('  Timp normal / Peste program', `${formatShortDuration(j.worked_seconds - (j.overtime_seconds ?? 0))} / ${formatShortDuration(j.overtime_seconds ?? 0)}  (finalizata: ${j.completed_at ? new Date(j.completed_at).toLocaleDateString('ro-RO') : '-'})`));
+      // FIX: worked_seconds conține DOAR timp normal (nu se scade overtime_seconds)
+      lines.push(pdfRow('  Timp normal / Peste program', `${formatShortDuration(j.worked_seconds)} / ${formatShortDuration(j.overtime_seconds ?? 0)}  (finalizata: ${j.completed_at ? new Date(j.completed_at).toLocaleDateString('ro-RO') : '-'})`));
     }
   }
   lines.push(
     pdfHeading('Timpi'),
     pdfRow('Timp normal', formatShortDuration(normalSec)),
     pdfRow('Timp peste program', formatShortDuration(overtimeSec)),
-    { text: `Timp total:  ${formatShortDuration(totalSec)}`, size: 12, bold: true },
+    { text: `Timp total:  ${formatShortDuration(totalSec + overtimeSec)}`, size: 12, bold: true },
     pdfHeading('Cost'),
     pdfRow(`Cost timp normal (${normalRate} lei/ora)`, `${normalCost.toFixed(2)} lei`),
     pdfRow(`Cost timp suplimentar (${overtimeRate} lei/ora)`, `${overtimeCost.toFixed(2)} lei`),
@@ -1300,9 +1310,9 @@ function buildSingleJobReportLines(job: Job, car: Car, rates: Rates | null, empl
     pdfRow('  Ore lucrate', `${formatShortDuration(cost.totalSec)}  (normal ${formatShortDuration(cost.normalSec)} / peste program ${formatShortDuration(cost.overtimeSec)})`),
     pdfRow('  Cost manopera', `${cost.totalCost.toFixed(2)} lei  (normal ${cost.normalCost.toFixed(2)} lei x ${cost.normalRate} lei/ora + supl. ${cost.overtimeCost.toFixed(2)} lei x ${cost.overtimeRate} lei/ora)`),
     pdfHeading('Total'),
-    { text: `Total fără TVA: ${totalWithoutVat.toFixed(2)} lei`, size: 11, bold: false, gapBefore: 8 },
-    { text: `TVA (${vatRate}%): ${vatAmount.toFixed(2)} lei`, size: 11, bold: false },
-    { text: `TOTAL CU TVA: ${totalWithVat.toFixed(2)} lei`, size: 14, bold: true, gapBefore: 6 },
+    { text: `TVA (${vatRate}%): ${vatAmount.toFixed(2)} lei`, size: 11, bold: false, gapBefore: 8 },
+    { text: `TOTAL FĂRĂ TVA: ${totalWithoutVat.toFixed(2)} lei`, size: 14, bold: true, gapBefore: 6, color: '#EF4444' },
+    { text: `TOTAL CU TVA: ${totalWithVat.toFixed(2)} lei`, size: 16, bold: true, gapBefore: 6, color: '#22C55E' },
     pdfHeading('Generat'),
     pdfRow('Data generării', `${new Date().toLocaleString('ro-RO')} - SERVIX Service Auto`),
   ];
@@ -1334,13 +1344,15 @@ function jobOccurrenceYear(job: Job): number {
  * mecanismul existent din buildCarReportLines (tarife normale/garanție/supl.).
  */
 function computeJobCost(job: Job, car: Car, rates: Rates | null): { normalSec: number; overtimeSec: number; normalRate: number; overtimeRate: number; normalCost: number; overtimeCost: number; totalSec: number; totalCost: number } {
-  const normalSec = job.worked_seconds - (job.overtime_seconds ?? 0);
+  // FIX: worked_seconds conține DOAR timp normal (nu se scade overtime_seconds)
+  const normalSec = job.worked_seconds;
   const overtimeSec = job.overtime_seconds ?? 0;
   const normalRate = car.is_warranty ? (rates?.warranty_rate ?? 0) : (rates?.normal_rate ?? 100);
   const overtimeRate = rates?.overtime_rate ?? 150;
   const normalCost = (normalSec / 3600) * normalRate;
   const overtimeCost = (overtimeSec / 3600) * overtimeRate;
-  return { normalSec, overtimeSec, normalRate, overtimeRate, normalCost, overtimeCost, totalSec: job.worked_seconds, totalCost: normalCost + overtimeCost };
+  // FIX: totalSec = timp normal + timp peste program (nu doar worked_seconds)
+  return { normalSec, overtimeSec, normalRate, overtimeRate, normalCost, overtimeCost, totalSec: normalSec + overtimeSec, totalCost: normalCost + overtimeCost };
 }
 
 /** Colecteaza toate aparitiile lucrarilor din toate masinile, sortate pe an. */
@@ -1452,9 +1464,9 @@ function buildTotalReportLines(cars: Car[], rates: Rates | null, employeeName: (
     const subtotalWithoutVat = grandTotalCost;
     const vatAmount = (subtotalWithoutVat * vatRate) / 100;
     const grandTotalWithVat = subtotalWithoutVat + vatAmount;
-    lines.push({ text: `Subtotal fara TVA: ${subtotalWithoutVat.toFixed(2)} lei`, size: 11, bold: false, gapBefore: 8 });
-    lines.push({ text: `TVA (${vatRate}%): ${vatAmount.toFixed(2)} lei`, size: 11, bold: false });
-    lines.push({ text: `TOTAL CU TVA: ${grandTotalWithVat.toFixed(2)} lei`, size: 14, bold: true, gapBefore: 6 });
+    lines.push({ text: `TVA (${vatRate}%): ${vatAmount.toFixed(2)} lei`, size: 11, bold: false, gapBefore: 8 });
+    lines.push({ text: `TOTAL FĂRĂ TVA: ${subtotalWithoutVat.toFixed(2)} lei`, size: 14, bold: true, gapBefore: 6, color: '#EF4444' });
+    lines.push({ text: `TOTAL CU TVA: ${grandTotalWithVat.toFixed(2)} lei`, size: 16, bold: true, gapBefore: 6, color: '#22C55E' });
   }
   lines.push(pdfHeading('Generat'), pdfRow('Data generarii', `${new Date().toLocaleString('ro-RO')} - SERVIX Service Auto`));
   return lines;
@@ -2292,7 +2304,8 @@ function CarHistoryModal({ car, employees, rates, onClose, onRefresh }: { car: C
   const overtimeRateC = rates?.overtime_rate ?? 0;
   const jobCosts = sortedJobs.map((job: Job) => {
     const ot = job.overtime_seconds ?? 0;
-    const nrm = Math.max(0, job.worked_seconds - ot);
+    // FIX: worked_seconds conține DOAR timp normal (nu se scade overtime_seconds)
+    const nrm = job.worked_seconds;
     return { job, nH: nrm / 3600, oH: ot / 3600, cost: (nrm / 3600) * normalRateC + (ot / 3600) * overtimeRateC };
   });
   const totalCost = jobCosts.reduce((t, r) => t + r.cost, 0);

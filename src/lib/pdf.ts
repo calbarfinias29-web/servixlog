@@ -3,7 +3,7 @@
  * Produces a real, downloadable PDF file (A4 pages, Helvetica) from text lines.
  */
 
-export interface PdfLine { text: string; size: number; bold: boolean; gapBefore?: number }
+export interface PdfLine { text: string; size: number; bold: boolean; gapBefore?: number; color?: string }
 
 const A4_W = 595.28;
 const A4_H = 841.89;
@@ -45,6 +45,13 @@ export function generateReportPdf(fileName: string, lines: PdfLine[]): void {
     for (const line of pageLines) {
       cy -= (line.gapBefore ?? 0) + lineHeight(line.size);
       parts.push(`/F${line.bold ? 2 : 1} ${line.size} Tf`);
+      // Apply color if specified (RGB values 0-1)
+      if (line.color && line.color.match(/^#[0-9A-Fa-f]{6}$/)) {
+        const r = parseInt(line.color.slice(1, 3), 16) / 255;
+        const g = parseInt(line.color.slice(3, 5), 16) / 255;
+        const b = parseInt(line.color.slice(5, 7), 16) / 255;
+        parts.push(`${r.toFixed(3)} ${g.toFixed(3)} ${b.toFixed(3)} rg`);
+      }
       parts.push(`1 0 0 1 ${MARGIN.toFixed(2)} ${cy.toFixed(2)} Tm`);
       parts.push(`(${esc(line.text)}) Tj`);
     }
