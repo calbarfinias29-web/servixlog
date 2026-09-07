@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const MIGRATION = 'supabase/migrations/20260907100000_servix_restore_operational_reset.sql';
+const MIGRATION = 'supabase/migrations/20260907110000_servix_reset_password_change.sql';
 const migrationSql = readFileSync(join(ROOT, MIGRATION), 'utf8');
 const appTsx = readFileSync(join(ROOT, 'src/App.tsx'), 'utf8');
 
@@ -160,7 +160,7 @@ console.log('F. Frontend-ul primeste succesul corect (flux UI real)');
 
 console.log('G. Nu se expun date sensibile catre frontend');
 {
-  const REAL_HASH = 'd3f34b2895a80d234596d158fc015bdc';
+  const REAL_HASH = 'b44f95103ffcd3233800aee875c0c903';
   check('hash-ul real al parolei NU apare in src/App.tsx', !appTsx.includes(REAL_HASH));
   const srcFiles = ['src/lib/supabase.ts', 'src/data/index.ts', 'src/data/SupabaseDataAdapter.ts', 'src/data/LocalDataAdapter.ts'];
   let leaked = false;
@@ -184,7 +184,7 @@ console.log('H. Drepturile EXECUTE ale functiei');
   check('lockout 5 incercari / 15 minute in functie', /v_fail_no >= 5/.test(migrationSql) && /interval '15 minutes'/.test(migrationSql));
   const fns = [...migrationSql.matchAll(/CREATE OR REPLACE FUNCTION (\w+)/g)].map((m) => m[1]);
   check('nu se ating alte functii (doar reset_operational_data)', fns.length === 1 && fns[0] === 'reset_operational_data');
-  check('hash-ul real al parolei este pastrat neschimbat in migratie', migrationSql.includes('d3f34b2895a80d234596d158fc015bdc'));
+  check('hash-ul real al parolei este cel nou in migratie', migrationSql.includes('b44f95103ffcd3233800aee875c0c903'));
 }
 
 console.log('');
