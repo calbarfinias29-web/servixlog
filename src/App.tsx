@@ -2177,8 +2177,8 @@ function SettingsView({ schedule, rates, employees, cars, onRefresh, onGoToEmplo
 <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
 {timeFields.map(([key, label]) => <label key={key} className="block text-[13px] font-semibold" style={{ color: SV.muted }}>{label}<span className="relative mt-2 block"><input type="time" value={form[key]} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [key]: e.target.value })} className="h-[50px] w-full rounded-[10px] border bg-[var(--surface)] px-3 pr-9 text-[15px] font-semibold outline-none focus:border-[var(--primary)]" style={{ borderColor: SV.border, color: SV.navy }} /><Clock size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2" style={{ color: SV.muted }} /></span></label>)}
 </div>
+<div className="mt-6 flex justify-center"><button onClick={() => void save()} className="flex h-[44px] items-center justify-center gap-2 rounded-lg px-6 text-sm font-bold text-white transition hover:brightness-110" style={{ background: SV.purple }}><Check size={16} /> Salvează programul</button></div>
 </div>
-<div className="flex justify-center"><button onClick={() => void save()} className="flex h-[44px] items-center justify-center gap-2 rounded-lg px-6 text-sm font-bold text-white transition hover:brightness-110" style={{ background: SV.purple }}><Check size={16} /> Salvează programul</button></div>
 <div className={settingsTab === 'automation' ? '' : 'hidden'}><EventModesCard employees={employees} onRefresh={onRefresh} /></div>
 <div className={settingsTab === 'general' ? '' : 'hidden'}>
 <div className="rounded-[18px] border bg-[var(--surface)] p-6" style={{ borderColor: SV.border }}>
