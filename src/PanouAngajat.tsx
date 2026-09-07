@@ -3,7 +3,10 @@ import { Home, CarFront, Wrench, History, UserRound, Clock3, Pause, Clock, Check
 import { supabase } from '@/lib/supabase';
 import { VehicleImage } from '@/components/VehicleImage';
 import { searchIncludes } from '@/lib/search';
+import { formatClockDate, formatClockTime } from '@/lib/clock';
+import { ACTIVITY_EVENTS, createInactivityWatch, INACTIVITY_TIMEOUT_MS } from '@/lib/inactivity';
 import { EmployeeJobDetailsModal } from '@/components/JobDetailsModal';
+import { dataAdapter, registry } from '@/data';
 import type { Car, Employee, Job, JobStatus, Rates, Schedule, ScheduleDay } from '@/types';
 
 const C = {
@@ -199,6 +202,11 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
     let cancelled = false;
     void (async () => {
       try {
+        if (registry.kind === 'local') {
+          const { data, error: localError } = await dataAdapter.getRates();
+          if (!cancelled && !localError && data) setRates(data);
+          return;
+        }
         const { data, error: rErr } = await supabase.from('rates').select('*').order('id').limit(1);
         if (!cancelled && !rErr && data?.[0]) setRates(data[0] as Rates);
       } catch { /* tarife indisponibile: panoul de detalii rămâne fără calcul cost */ }
@@ -206,6 +214,33 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
     return () => { cancelled = true; };
   }, []);
   useEffect(() => { const i = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(i); }, []);
+
+  // === AUTO-RETURN LA „CINE PREIA TABLETA?” DUPĂ EXACT 5 MINUTE (300 s DE INACTIVITATE) ===
+  // Acesta este UN TIMEOUT AL INTERFEȚEI — DOAR revine la ecranul de selectare
+  // a tabletei (același comportament ca „SCHIMBĂ ANGAJATUL”/„Deconectare”).NU oprește,
+  // NU pune pe pauză și NU finalizează niciun job/lucrare/timer de lucru —
+  // lucrarea rămâne EXACT cum e (started_at/worked_seconds NU sunt atinse).
+  // Funcționează identic în Web și Local (componenta comună este folosită în ambele moduri.
+
+  // onChange este o funcție recreată la fiecare render a App.core; folosim un ref ca timer-ul
+  // (și ultima activitate) să NU fie resetat când App re-renderizează (ex. la sincronizările de 60 s).
+  const onChangeRef = useRef(onChange);
+  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !onChange) return;
+    const watch = createInactivityWatch({
+      timeoutMs: INACTIVITY_TIMEOUT_MS,
+      onTimeout: (): void => { onChangeRef.current?.(); },
+    });
+    watch.start();
+    const handler = (): void => { watch.activity(); };
+    const passive = { passive: true } as AddEventListenerOptions;
+    ACTIVITY_EVENTS.forEach((ev) => window.addEventListener(ev, handler, passive));
+    return () => {
+      ACTIVITY_EVENTS.forEach((ev) => window.removeEventListener(ev, handler));
+      watch.dispose();
+    };
+  }, []);
 
   // === SINCRONIZARE EVENIMENTE AUTOMATE (Manual/Automat per angajat) ===
   // RPC idempotent (auto_sync_session): aplică evenimentele scadute conform
@@ -216,6 +251,10 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
   const refreshRef = useRef(onRefresh);
   refreshRef.current = onRefresh;
   useEffect(() => {
+    if (registry.kind === 'local') {
+      void refreshRef.current();
+      return;
+    }
     let cancelled = false;
     const sync = async (forceRefresh = false): Promise<void> => {
       try {
@@ -334,6 +373,19 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
   const updateJob = async (job: Job, status: JobStatus, key: string): Promise<void> => {
     if (busy) return;
     setBusy(key); setError('');
+    if (registry.kind === 'local') {
+      if (!dataAdapter.updateJobTimerStatus) { setError('Operația timer local nu este disponibilă.'); setBusy(null); return; }
+      const { error: localError } = await dataAdapter.updateJobTimerStatus({
+        job_id: job.id,
+        employee_id: employee.id,
+        status: status as 'asteptare' | 'asteptare_piese' | 'finalizat',
+        pause_reason: status === 'finalizat' ? 'completed' : status === 'asteptare_piese' ? 'parts' : 'manual',
+      });
+      if (localError) setError(localError.message);
+      else await onRefresh();
+      setBusy(null);
+      return;
+    }
     let workedSeconds: number | null = null;
     let overtimeSeconds: number | null = null;
     let completedAt: string | null = null;
@@ -401,6 +453,14 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
   const handleStart = async (job: Job): Promise<void> => {
     if (busy || breakActive) return;
     setBusy('continua'); setError('');
+    if (registry.kind === 'local') {
+      if (!dataAdapter.startJobTimer) { setError('Operația timer local nu este disponibilă.'); setBusy(null); return; }
+      const { error: localError } = await dataAdapter.startJobTimer({ job_id: job.id, employee_id: employee.id });
+      if (localError) setError(localError.message);
+      else await onRefresh();
+      setBusy(null);
+      return;
+    }
     const { data, error: rpcError } = await supabase.rpc('safe_start_job', { p_job_id: job.id, p_employee_id: employee.id });
     if (rpcError || (data && data.ok === false)) { setError(rpcError ? 'Nu am putut porni lucrarea.' : String(data?.reason)); setBusy(null); return; }
     await onRefresh(); setBusy(null);
@@ -418,6 +478,15 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
     if (busy) return;
     if (!job.id) { setError('Lucrarea curentă nu are un ID valid.'); return; }
     setBusy(start ? 'start_ot' : 'stop_ot'); setError('');
+    if (registry.kind === 'local') {
+      const operation = start ? dataAdapter.startOvertimeTimer : dataAdapter.stopOvertimeTimer;
+      if (!operation) { setError('Operația timer local nu este disponibilă.'); setBusy(null); return; }
+      const { error: localError } = await operation({ job_id: job.id, employee_id: employee.id });
+      if (localError) setError(localError.message);
+      else await onRefresh();
+      setBusy(null);
+      return;
+    }
     const rpcName = start ? 'safe_start_overtime' : 'safe_stop_overtime';
     const { data, error: rpcError } = await supabase.rpc(rpcName, { p_job_id: job.id, p_employee_id: employee.id });
     // Eroare de rețea / permisiuni / funcție inexistentă: afișăm eroarea reală,
@@ -443,6 +512,13 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
   const handleAssign = async (car: Car): Promise<void> => {
     if (busy) return;
     setBusy('assign'); setError('');
+    if (registry.kind === 'local' && dataAdapter.updateCar) {
+      const { error: localError } = await dataAdapter.updateCar(car.id, { assigned_employee_id: employee.id });
+      if (localError) setError(localError.message);
+      else { setSelectedCarId(car.id); setShowPicker(false); await onRefresh(); }
+      setBusy(null);
+      return;
+    }
     const { data, error: rpcError } = await supabase.rpc('safe_assign_car', { p_car_id: car.id, p_employee_id: employee.id });
     if (rpcError || (data && data.ok === false)) { setError('Nu am putut aloca mașina.'); setBusy(null); return; }
     setSelectedCarId(car.id); setShowPicker(false); await onRefresh(); setBusy(null);
@@ -553,19 +629,17 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
 
         {/* COLOANA DREAPTA */}
         <div className="min-w-0 flex-1">
-          {/* HEADER — nume și oră REALE */}
-          <header className="flex h-[64px] items-center justify-between px-5" style={{ background: 'var(--surface)', borderBottom: `1px solid ${'var(--border)'}` }}>
+          {/* HEADER — SERVix + CEAS MARE (ora + data), REALE și RESPONSIVE (desktop + tabletă portrait/landscape) */}
+          <header className="relative flex h-[64px] items-center justify-between px-5" style={{ background: 'var(--surface)', borderBottom: `1px solid ${'var(--border)'}` }}>
             <div className="flex items-center gap-5">
               <div className="text-[22px] font-extrabold tracking-tight">
                 <span style={{ color: 'var(--text-primary)' }}>Serv</span><span style={{ color: 'var(--primary)' }}>ix</span>
               </div>
-              <div className="flex items-center gap-2">
-                <Clock3 size={16} style={{ color: 'var(--text-secondary)' }} />
-                <div>
-                  <div className="text-[14px] font-bold leading-tight" style={{ color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums' }}>{new Date(now).toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' })}</div>
-                  <div className="text-[11px] capitalize leading-tight" style={{ color: 'var(--text-secondary)' }}>{new Date(now).toLocaleDateString('ro-RO', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })}</div>
-                </div>
-              </div>
+            </div>
+            {/* CEAS MARE — ora foarte vizibilă + data; nu blocheză butoanele (pointer-events-none) */}
+            <div className="pointer-events-none absolute inset-y-0 left-1/2 z-0 hidden -translate-x-1/2 flex-col items-center justify-center md:flex" style={{ color: 'var(--text-primary)' }}>
+              <div className="flex items-center gap-2 text-[36px] font-extrabold leading-none tracking-tight tabular-nums"><Clock3 size={26} />{formatClockTime(now)}</div>
+              <div className="text-[13px] font-semibold capitalize leading-tight" style={{ color: 'var(--text-secondary)' }}>{formatClockDate(now)}</div>
             </div>
             <div className="flex items-center gap-2.5">
               {onChange && (

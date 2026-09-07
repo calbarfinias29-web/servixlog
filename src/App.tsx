@@ -8,19 +8,26 @@ import {
   UserPlus, Mail, Phone, Coins, MoreVertical, ChevronDown, DollarSign, SlidersHorizontal, Percent,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { dataAdapter, registry } from '@/data';
 import type { Car, CarStatus, Employee, EmployeeEventSettings, EventMode, Job, JobStatus, Priority, Rates, Schedule, ScheduleDay, Theme, ThemeColors, View, FinancialStatus, FuelLevel, PlateHistoryEntry, MileageLogEntry, Appointment, AppointmentStatus, CarPhoto } from '@/types';
 import { generateReportPdf, title as pdfTitle, heading as pdfHeading, row as pdfRow, type PdfLine } from '@/lib/pdf';
 import PanouAngajat, { fmt as fmtHMS, getScheduleDay, overlapSeconds } from '@/PanouAngajat';
 import { VehicleImage } from '@/components/VehicleImage';
+import { formatClockDate, formatClockTime } from '@/lib/clock';
 import { VEHICLE_MAKES, modelsFor } from '@/lib/vehicleCatalog';
 import ServiceDarkDashboard from '@/ServiceDarkDashboard';
 import { EmployeeReportsTab } from '@/EmployeeReportsTab';
 import { normalizeSearch, searchIncludes } from '@/lib/search';
 import { Modal, IconButton } from '@/components/Modal';
 import { formatShortDuration } from '@/lib/format';
-import { computeJobCost } from '@/lib/costs';
+import { calculateCostSummary, computeJobCost } from '@/lib/costs';
 import { JobDetailsBody } from '@/components/JobDetailsModal';
 import { CatalogAutocomplete, type CatalogOption } from '@/components/CatalogAutocomplete';
+import AgentModal from '@/agent/AgentModal';
+import QRCode from 'qrcode';
+import JsBarcode from 'jsbarcode';
+import { createPairingPayload } from './devicePairing';
+import type { DevicePairingResult, DeviceType, ManagedDevice } from './data/DataAdapter';
 
 let catalogFieldOptions: { makes: CatalogOption[]; models: CatalogOption[]; works: CatalogOption[] } = { makes: [], models: [], works: [] };
 
@@ -167,6 +174,7 @@ function clearTheme(): void {
 function Badge({ value, compact = false }: { value: string; compact?: boolean }) {
   return <span className={`inline-flex items-center rounded-md font-semibold tracking-[0.08em] ${compact ? 'px-2 py-1 text-[10px]' : 'px-2.5 py-1.5 text-[11px]'} ${statusStyles[value] ?? 'bg-[var(--border)] text-[var(--text-secondary)]'}`}>{statusLabels[value as keyof typeof statusLabels] ?? value}</span>;
 }
+
 // ============================================================
 // LANDING
 // ============================================================
@@ -176,6 +184,9 @@ function Landing({ employees, onEmployee, onAdmin, children }: { employees: Empl
   const [codeError, setCodeError] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [showCode, setShowCode] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  // CEAS MARE „Cine preia tableta?” — se actualizează automat; curățat la unmount.
+  useEffect(() => { const id = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(id); }, []);
 
   const handleSelect = (emp: Employee): void => {
     if (emp.access_code) { setSelectedEmp(emp); setCode(''); setCodeError(''); }
@@ -193,13 +204,18 @@ function Landing({ employees, onEmployee, onAdmin, children }: { employees: Empl
 
   return <main className="min-h-screen px-5 py-8 sm:px-10" style={{ background: 'var(--background)' }}>
     <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-6xl flex-col justify-between">
-      <header className="flex items-center justify-between">
+      <header className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <img src={SERVIX_LOGO_PATH} alt="SERVIX logo" className="h-12 w-12 rounded-xl object-cover ring-1 ring-[var(--border)]" />
           <div>
             <div className="text-2xl font-extrabold tracking-tight" style={{ color: 'var(--text-primary)' }}>SERVIX</div>
             <div className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: 'var(--text-secondary)' }}>Atelier management</div>
           </div>
+        </div>
+        {/* CEAS — parte integrantă a header-ului, dreapta; logica (interval + cleanup) neatinsă */}
+        <div className="flex flex-none flex-col items-end rounded-xl border px-5 py-3 sm:px-7 sm:py-4" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+          <div className="text-[52px] font-extrabold leading-none tracking-tight tabular-nums md:text-[64px] lg:text-[76px]" style={{ color: 'var(--text-primary)' }}>{formatClockTime(now)}</div>
+          <div className="mt-1 text-sm font-semibold capitalize leading-tight sm:text-base md:text-lg" style={{ color: 'var(--text-secondary)' }}>{formatClockDate(now)}</div>
         </div>
       </header>
       <section className="mx-auto w-full max-w-4xl py-14">
@@ -712,9 +728,62 @@ function CarPicker({ cars, filter, onFilter, query, onQuery, onAssign, assigning
 }
 
 // ============================================================
+// LOCAL DEVICE MANAGEMENT
+// ============================================================
+function DevicePairingCode({ pairing }: { pairing: DevicePairingResult }): JSX.Element {
+  const [qr, setQr] = useState('');
+  const barcodeRef = useRef<SVGSVGElement>(null);
+  const payload = createPairingPayload(pairing.pairing, pairing.device.deviceId, pairing.credential);
+  useEffect(() => {
+    let cancelled = false;
+    void QRCode.toDataURL(payload, { errorCorrectionLevel: 'M', margin: 1, width: 220 }).then((url: string) => { if (!cancelled) setQr(url); });
+    return () => { cancelled = true; };
+  }, [payload]);
+  useEffect(() => {
+    if (barcodeRef.current) JsBarcode(barcodeRef.current, payload, { format: 'CODE128', displayValue: false, height: 64, margin: 4 });
+  }, [payload]);
+  return <div className="mt-5 rounded-xl border p-4" style={{ borderColor: 'var(--primary)', background: 'color-mix(in srgb, var(--primary) 6%, transparent)' }}>
+    <p className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Cod de pairing: {pairing.device.deviceName}</p>
+    <p className="mt-1 break-all text-xs" style={{ color: 'var(--text-secondary)' }}>Device ID: {pairing.device.deviceId}</p>
+    <div className="mt-4 grid gap-5 sm:grid-cols-2 sm:items-center">
+      <div className="rounded-lg bg-white p-3">{qr && <img src={qr} alt="QR pairing SERVIX" className="mx-auto h-48 w-48" />}</div>
+      <div className="rounded-lg bg-white p-3"><svg ref={barcodeRef} className="h-20 w-full" aria-label="Barcode pairing SERVIX" /></div>
+    </div>
+    <p className="mt-3 text-xs" style={{ color: 'var(--text-secondary)' }}>Credentialul este afișat o singură dată. Salvează codul pe dispozitivul autorizat.</p>
+  </div>;
+}
+
+function DevicesView(): JSX.Element {
+  const [devices, setDevices] = useState<ManagedDevice[]>([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [deviceType, setDeviceType] = useState<DeviceType>('TABLET');
+  const [deviceName, setDeviceName] = useState('');
+  const [pairing, setPairing] = useState<DevicePairingResult | null>(null);
+  const [message, setMessage] = useState('');
+  const load = async (): Promise<void> => { if (!dataAdapter.getDevices) return; const result = await dataAdapter.getDevices(); if (!result.error) setDevices(result.data?.devices ?? []); else setMessage(result.error.message); };
+  useEffect(() => { void load(); }, []);
+  const create = async (): Promise<void> => {
+    if (!dataAdapter.createDevicePairing) return;
+    const result = await dataAdapter.createDevicePairing({ deviceType, deviceName: deviceName.trim() || `${deviceType} SERVIX` });
+    if (result.error || !result.data) { setMessage(result.error?.message ?? 'Pairingul nu a putut fi inițiat.'); return; }
+    setPairing(result.data); setShowAdd(false); setDeviceName(''); await load();
+  };
+  const revoke = async (device: ManagedDevice): Promise<void> => { if (!dataAdapter.revokeDevice) return; const result = await dataAdapter.revokeDevice(device.deviceId); if (result.error) setMessage(result.error.message); else await load(); };
+  const reactivate = async (device: ManagedDevice): Promise<void> => { if (!dataAdapter.reactivateDevice) return; const result = await dataAdapter.reactivateDevice(device.deviceId); if (result.error || !result.data) setMessage(result.error?.message ?? 'Reactivarea nu a reușit.'); else { setPairing(result.data); await load(); } };
+  const typeLabel: Record<DeviceType, string> = { MAIN_PC: 'Main PC', PC_COMPANION: 'PC Companion', TABLET: 'Tabletă', PHONE: 'Telefon' };
+  const statusLabel = (device: ManagedDevice): string => device.status === 'revoked' ? 'Revocat' : device.status === 'pending' ? 'Neperecheat' : device.lastSeenAt && Date.now() - new Date(device.lastSeenAt).getTime() < 120000 ? 'Online' : 'Offline';
+  return <div><div className="mb-6 flex items-end justify-between gap-4"><div><h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Dispozitive</h2><p className="mt-1 text-sm" style={{ color: 'var(--text-secondary)' }}>Pairing persistent pentru dispozitivele Local.</p></div><button onClick={() => setShowAdd(true)} className="rounded-lg px-4 py-3 text-sm font-bold text-white" style={{ background: 'var(--button)' }}><Plus size={16} className="mr-2 inline" />Adaugă dispozitiv</button></div>
+    {message && <p className="mb-4 rounded-lg border p-3 text-sm" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}>{message}</p>}
+    {showAdd && <div className="mb-5 rounded-xl border p-5" style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}><div className="grid gap-3 sm:grid-cols-2"><label className="text-xs font-bold uppercase text-[var(--text-secondary)]">Tip<select value={deviceType} onChange={(event) => setDeviceType(event.target.value as DeviceType)} className="mt-2 h-11 w-full rounded-lg border px-3 text-sm" style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text-primary)' }}>{(Object.keys(typeLabel) as DeviceType[]).map((type) => <option key={type} value={type}>{typeLabel[type]}</option>)}</select></label><label className="text-xs font-bold uppercase text-[var(--text-secondary)]">Nume<input value={deviceName} onChange={(event) => setDeviceName(event.target.value)} placeholder="Tabletă atelier 01" className="mt-2 h-11 w-full rounded-lg border px-3 text-sm" style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text-primary)' }} /></label></div><div className="mt-4 flex gap-2"><button onClick={() => void create()} className="rounded-lg px-4 py-2 text-sm font-bold text-white" style={{ background: 'var(--button)' }}>Generează pairing</button><button onClick={() => setShowAdd(false)} className="rounded-lg border px-4 py-2 text-sm font-bold" style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>Anulează</button></div></div>}
+    <div className="grid gap-3">{devices.length === 0 ? <div className="rounded-xl border border-dashed p-8 text-center text-sm" style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>Nu există dispozitive înregistrate.</div> : devices.map((device) => <div key={device.deviceId} className="rounded-xl border p-4" style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-bold" style={{ color: 'var(--text-primary)' }}>{device.deviceName}</p><p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{typeLabel[device.deviceType]} · {device.deviceId}</p></div><span className="rounded px-2 py-1 text-xs font-bold" style={{ color: device.status === 'revoked' ? 'var(--danger)' : 'var(--success)', background: 'color-mix(in srgb, var(--success) 10%, transparent)' }}>{statusLabel(device)}</span></div><div className="mt-3 grid gap-2 text-xs sm:grid-cols-3" style={{ color: 'var(--text-secondary)' }}><span>Pairing: {device.pairedAt ? new Date(device.pairedAt).toLocaleString('ro-RO') : '—'}</span><span>Ultima conexiune: {device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString('ro-RO') : '—'}</span><span>Client API: {device.apiVersion}</span></div><div className="mt-3 flex gap-2">{device.status === 'revoked' ? <button onClick={() => void reactivate(device)} className="rounded-lg border px-3 py-2 text-xs font-bold" style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>Reactivează</button> : <button onClick={() => void revoke(device)} className="rounded-lg border px-3 py-2 text-xs font-bold" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}>Revocă</button>}</div></div>)}</div>
+    {pairing && <DevicePairingCode pairing={pairing} />}
+  </div>;
+}
+
+// ============================================================
 // ADMIN PANEL (desktop)
 // ============================================================
-type AdminTab = 'dashboard' | 'employees' | 'cars' | 'jobs' | 'reports' | 'appointments' | 'themes' | 'settings';
+type AdminTab = 'dashboard' | 'employees' | 'cars' | 'jobs' | 'reports' | 'appointments' | 'themes' | 'settings' | 'devices';
 
 function AdminPanel({ employees, cars, appointments, schedule, rates, themes, vehicleMakes, vehicleModels, workCatalog, onRefresh, onExit, adminTheme, employeeTheme, onChangeAdminTheme, onChangeEmployeeTheme }: { employees: Employee[]; cars: Car[]; appointments: Appointment[]; schedule: Schedule | null; rates: Rates | null; themes: Theme[]; vehicleMakes: CatalogOption[]; vehicleModels: CatalogOption[]; workCatalog: CatalogOption[]; onRefresh: () => Promise<void>; onExit: () => void; adminTheme: 'light' | 'dark'; employeeTheme: 'light' | 'dark'; onChangeAdminTheme: (m: 'light' | 'dark') => void; onChangeEmployeeTheme: (m: 'light' | 'dark') => void }) {
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
@@ -728,6 +797,7 @@ function AdminPanel({ employees, cars, appointments, schedule, rates, themes, ve
   const [dateTo, setDateTo] = useState('');
   const [historyCar, setHistoryCar] = useState<Car | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [showAgent, setShowAgent] = useState(false);
 
   const employeeName = (id: string | null): string => employees.find((e: Employee) => e.id === id)?.name ?? 'Nealocat';
 
@@ -771,8 +841,9 @@ function AdminPanel({ employees, cars, appointments, schedule, rates, themes, ve
     ['themes', 'Teme', Palette],
     ['settings', 'Setări', Settings],
   ];
+  if (registry.kind === 'local') navItems.push(['devices', 'Dispozitive', ShieldCheck]);
 
-  return <div className="min-h-screen" style={{ background: 'var(--background)', colorScheme: adminTheme === 'dark' ? 'dark' : 'light' }}><aside className="fixed inset-y-0 left-0 hidden w-64 border-r lg:block" style={{ background: 'var(--sidebar)', borderColor: 'var(--border)' }}><div className="flex h-full flex-col"><div className="flex h-20 items-center gap-3 border-b px-6" style={{ borderColor: 'var(--border)' }}><div className="flex h-9 w-9 items-center justify-center rounded-lg text-white" style={{ background: 'var(--primary)' }}><Wrench size={18} /></div><div><div className="font-extrabold tracking-tight" style={{ color: 'var(--text-primary)' }}>SERVIX</div><div className="text-[10px] uppercase tracking-[0.17em]" style={{ color: 'var(--text-secondary)' }}>Service Auto</div></div></div><nav className="flex-1 space-y-1 p-4">{navItems.map(([key, label, Icon]) => <button key={key} onClick={() => setActiveTab(key)} className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold transition" style={activeTab === key ? { background: 'color-mix(in srgb, var(--primary) 12%, transparent)', color: 'var(--primary)' } : { color: 'var(--text-secondary)' }}>{createElement(Icon, { size: 18 })}{label}</button>)}</nav><div className="border-t p-4" style={{ borderColor: 'var(--border)' }}><button onClick={onExit} className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold transition" style={{ color: 'var(--text-secondary)' }}><LogOut size={18} /> Ieșire</button><div className="mt-3 rounded-xl border p-4" style={{ borderColor: 'var(--border)', background: 'var(--card)' }}><div className="flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg" style={{ background: 'color-mix(in srgb, var(--primary) 12%, transparent)', color: 'var(--primary)' }}><ShieldCheck size={15} /></span><span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Control sigur</span></div><p className="mt-2 text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>Datele tale sunt protejate cu cele mai bune practici.</p></div></div></div></aside><div className="lg:pl-64"><header className="sticky top-0 z-20 flex h-20 items-center justify-between border-b px-5 backdrop-blur sm:px-8" style={{ borderColor: 'var(--border)', background: 'color-mix(in srgb, var(--surface) 95%, transparent)' }}><div><p className="text-[11px] font-bold uppercase tracking-[0.2em]" style={{ color: 'var(--primary)' }}>Control service</p><h1 className="mt-1 text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{navItems.find(([k]) => k === activeTab)?.[1] ?? 'Dashboard'}</h1></div><div className="flex items-center gap-2"><button className="relative rounded-lg p-2.5" style={{ color: 'var(--text-secondary)' }}><Bell size={19} /><span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-orange-500" /></button><div className="hidden h-8 w-px sm:block" style={{ background: 'var(--border)' }} /><div className="hidden items-center gap-2 sm:flex"><span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Administrator</span><span className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: 'var(--text-primary)' }}>A</span></div></div></header><main className="mx-auto max-w-[1400px] px-5 py-7 sm:px-8">
+  return <div className="min-h-screen" style={{ background: 'var(--background)', colorScheme: adminTheme === 'dark' ? 'dark' : 'light' }}><aside className="fixed inset-y-0 left-0 hidden w-64 border-r lg:block" style={{ background: 'var(--sidebar)', borderColor: 'var(--border)' }}><div className="flex h-full flex-col"><div className="flex h-20 items-center gap-3 border-b px-6" style={{ borderColor: 'var(--border)' }}><div className="flex h-9 w-9 items-center justify-center rounded-lg text-white" style={{ background: 'var(--primary)' }}><Wrench size={18} /></div><div><div className="font-extrabold tracking-tight" style={{ color: 'var(--text-primary)' }}>SERVIX</div><div className="text-[10px] uppercase tracking-[0.17em]" style={{ color: 'var(--text-secondary)' }}>Service Auto</div></div></div><nav className="flex-1 space-y-1 p-4">{navItems.map(([key, label, Icon]) => <button key={key} onClick={() => setActiveTab(key)} className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold transition" style={activeTab === key ? { background: 'color-mix(in srgb, var(--primary) 12%, transparent)', color: 'var(--primary)' } : { color: 'var(--text-secondary)' }}>{createElement(Icon, { size: 18 })}{label}</button>)}</nav><div className="border-t p-4" style={{ borderColor: 'var(--border)' }}><button onClick={() => setShowAgent(true)} className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold transition mb-2" style={{ color: 'var(--primary)' }}>🤖 Agent SERVIX</button><button onClick={onExit} className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold transition" style={{ color: 'var(--text-secondary)' }}><LogOut size={18} /> Ieșire</button><div className="mt-3 rounded-xl border p-4" style={{ borderColor: 'var(--border)', background: 'var(--card)' }}><div className="flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg" style={{ background: 'color-mix(in srgb, var(--primary) 12%, transparent)', color: 'var(--primary)' }}><ShieldCheck size={15} /></span><span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Control sigur</span></div><p className="mt-2 text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>Datele tale sunt protejate cu cele mai bune practici.</p></div></div></div></aside><div className="lg:pl-64"><header className="sticky top-0 z-20 flex h-20 items-center justify-between border-b px-5 backdrop-blur sm:px-8" style={{ borderColor: 'var(--border)', background: 'color-mix(in srgb, var(--surface) 95%, transparent)' }}><div><p className="text-[11px] font-bold uppercase tracking-[0.2em]" style={{ color: 'var(--primary)' }}>Control service</p><h1 className="mt-1 text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{navItems.find(([k]) => k === activeTab)?.[1] ?? 'Dashboard'}</h1></div><div className="flex items-center gap-2"><button className="relative rounded-lg p-2.5" style={{ color: 'var(--text-secondary)' }}><Bell size={19} /><span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-orange-500" /></button><div className="hidden h-8 w-px sm:block" style={{ background: 'var(--border)' }} /><div className="hidden items-center gap-2 sm:flex"><span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Administrator</span><span className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: 'var(--text-primary)' }}>A</span></div></div></header><main className="mx-auto max-w-[1400px] px-5 py-7 sm:px-8">
   {activeTab === 'dashboard' && <DashboardView employees={employees} cars={cars} appointments={appointments} rates={rates} schedule={schedule} employeeName={employeeName} onRefresh={onRefresh} onShowCar={setHistoryCar} onAddCar={() => setShowAdd(true)} onGoToCars={() => setActiveTab('cars')} onGoToAppointments={() => setActiveTab('appointments')} onGoToEmployees={() => setActiveTab('employees')} onGoToReports={() => setActiveTab('reports')} />}
   {activeTab === 'employees' && <EmployeesView employees={employees} cars={cars} onRefresh={onRefresh} />}
   {activeTab === 'cars' && <CarsView cars={filteredCars} query={query} setQuery={setQuery} statusFilter={statusFilter} setStatusFilter={setStatusFilter} priorityFilter={priorityFilter} setPriorityFilter={setPriorityFilter} selectedEmployee={selectedEmployee} setSelectedEmployee={setSelectedEmployee} demoFilter={demoFilter} setDemoFilter={setDemoFilter} financialFilter={financialFilter} setFinancialFilter={setFinancialFilter} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} employees={employees} employeeName={employeeName} onShowCar={setHistoryCar} onAddCar={() => setShowAdd(true)} />}
@@ -781,7 +852,8 @@ function AdminPanel({ employees, cars, appointments, schedule, rates, themes, ve
   {activeTab === 'appointments' && <AppointmentsView appointments={appointments} cars={cars} employees={employees} employeeName={employeeName} onRefresh={onRefresh} />}
   {activeTab === 'themes' && <ThemesView themes={themes} onRefresh={onRefresh} adminTheme={adminTheme} employeeTheme={employeeTheme} onChangeAdminTheme={onChangeAdminTheme} onChangeEmployeeTheme={onChangeEmployeeTheme} />}
   {activeTab === 'settings' && <SettingsView schedule={schedule} rates={rates} employees={employees} cars={cars} onRefresh={onRefresh} onGoToEmployees={() => setActiveTab('employees')} />}
-  </main></div>{showAdd && <AddCarModal employees={employees} vehicleMakes={vehicleMakes} vehicleModels={vehicleModels} workCatalog={workCatalog} onClose={() => setShowAdd(false)} onSaved={async () => { setShowAdd(false); await onRefresh(); }} />}{historyCar && <CarHistoryModal car={historyCar} employees={employees} rates={rates} onClose={() => setHistoryCar(null)} onRefresh={onRefresh} />}</div>;
+  {activeTab === 'devices' && registry.kind === 'local' && <DevicesView />}
+  </main></div>{showAdd && <AddCarModal employees={employees} vehicleMakes={vehicleMakes} vehicleModels={vehicleModels} workCatalog={workCatalog} onClose={() => setShowAdd(false)} onSaved={async () => { setShowAdd(false); await onRefresh(); }} />}{historyCar && <CarHistoryModal car={historyCar} employees={employees} rates={rates} onClose={() => setHistoryCar(null)} onRefresh={onRefresh} />}{showAgent && <AgentModal onClose={() => setShowAgent(false)} />}</div>;
 }
 
 // ============================================================
@@ -1118,6 +1190,16 @@ function ChangeJobAllocationModal({ job, car, employees, employeeName, onSaved, 
     if (newEmpId === car.assigned_employee_id) { setMsg('Acest angajat este deja alocat.'); return; }
     setSaving(true); setMsg('');
     const adminId = employees.find((e: Employee) => e.role === 'admin')?.id ?? null;
+    if (registry.kind === 'local') {
+      if (!adminId || !dataAdapter.transferJob) { setMsg('Transferul local necesită un administrator valid.'); setSaving(false); return; }
+      const result = await dataAdapter.transferJob({ car_id: car.id, new_employee_id: newEmpId, admin_id: adminId });
+      if (result.error) { setMsg(result.error.message); setSaving(false); return; }
+      setMsg('Alocatorul a fost schimbat — timpul lucrat rămâne păstrat.');
+      setSaving(false);
+      await onSaved();
+      onClose();
+      return;
+    }
     const res = await supabase.rpc('admin_transfer_car', { p_car_id: car.id, p_new_employee_id: newEmpId, p_admin_id: adminId });
     if (res.error || (res.data && (res.data as { ok?: boolean } | null)?.ok === false)) {
       const up = await supabase.from('cars').update({ assigned_employee_id: newEmpId }).eq('id', car.id);
@@ -1227,9 +1309,11 @@ function buildCarReportLines(car: Car, rates: Rates | null, plateHistory: PlateH
 function buildSingleJobReportLines(job: Job, car: Car, rates: Rates | null, employeeName: (id: string | null) => string): PdfLine[] {
   const cost = computeJobCost(job, car, rates);
   const vatRate = rates?.vat_rate ?? 21;
-  const totalWithoutVat = cost.totalCost;
-  const vatAmount = (totalWithoutVat * vatRate) / 100;
-  const totalWithVat = totalWithoutVat + vatAmount;
+  const rawTotalWithoutVat = cost.totalCost;
+  const summary = calculateCostSummary(rawTotalWithoutVat, vatRate);
+  const totalWithoutVat = summary.subtotal;
+  const vatAmount = summary.vatAmount;
+  const totalWithVat = summary.totalWithVat;
   const dataFin = job.completed_at ?? job.started_at;
   return [
     pdfTitle('SERVIX - Raport per lucrare'),
@@ -1384,9 +1468,11 @@ function buildTotalReportLines(cars: Car[], rates: Rates | null, employeeName: (
     lines.push(pdfHeading('Total general (suplementar)'));
     lines.push(pdfRow('Ore totale', formatShortDuration(grandTotalSec)));
     const vatRate = rates?.vat_rate ?? 21;
-    const subtotalWithoutVat = grandTotalCost;
-    const vatAmount = (subtotalWithoutVat * vatRate) / 100;
-    const grandTotalWithVat = subtotalWithoutVat + vatAmount;
+    const rawSubtotalWithoutVat = grandTotalCost;
+    const summary = calculateCostSummary(rawSubtotalWithoutVat, vatRate);
+    const subtotalWithoutVat = summary.subtotal;
+    const vatAmount = summary.vatAmount;
+    const grandTotalWithVat = summary.totalWithVat;
     lines.push({ text: `TVA (${vatRate}%): ${vatAmount.toFixed(2)} lei`, size: 11, bold: false, gapBefore: 8 });
     lines.push({ text: `TOTAL FĂRĂ TVA: ${subtotalWithoutVat.toFixed(2)} lei`, size: 14, bold: true, gapBefore: 6, color: '#EF4444' });
     lines.push({ text: `TOTAL CU TVA: ${grandTotalWithVat.toFixed(2)} lei`, size: 16, bold: true, gapBefore: 6, color: '#22C55E' });
@@ -1523,12 +1609,24 @@ function AppointmentsView({ appointments, cars, employees, employeeName, onRefre
   }), [appointments, filterDate, filterClient, filterCar, filterEmployee, filterStatus]);
 
   const updateStatus = async (apt: Appointment, status: AppointmentStatus): Promise<void> => {
+    if (registry.kind === 'local') {
+      if (!dataAdapter.updateAppointment) return;
+      const { error } = await dataAdapter.updateAppointment(apt.id, { status });
+      if (!error) await onRefresh();
+      return;
+    }
     await supabase.from('appointments').update({ status }).eq('id', apt.id);
     await onRefresh();
   };
   const deleteAppt = async (apt: Appointment): Promise<void> => {
     if (!apt.is_demo) return;
     if (!window.confirm('Ștergi această programare?')) return;
+    if (registry.kind === 'local') {
+      if (!dataAdapter.deleteAppointment) return;
+      const { error } = await dataAdapter.deleteAppointment(apt.id);
+      if (!error) await onRefresh();
+      return;
+    }
     await supabase.from('appointments').delete().eq('id', apt.id);
     await onRefresh();
   };
@@ -2008,8 +2106,20 @@ function SettingsView({ schedule, rates, employees, cars, onRefresh, onGoToEmplo
   const [form, setForm] = useState({ work_start: schedule?.work_start?.slice(0, 5) ?? '07:00', break_start: schedule?.break_start?.slice(0, 5) ?? '13:00', break_end: schedule?.break_end?.slice(0, 5) ?? '14:00', work_end: schedule?.work_end?.slice(0, 5) ?? '18:00', days: scheduleDaysFor(schedule), normal_rate: rates?.normal_rate ?? 100, urgent_rate: rates?.urgent_rate ?? 150, warranty_rate: rates?.warranty_rate ?? 0, overtime_rate: rates?.overtime_rate ?? 150, vat_rate: rates?.vat_rate ?? 21 });
   const save = async (): Promise<void> => {
     setSaveError('');
+    const dayValues = Object.fromEntries(scheduleDayFields.flatMap(({ key }) => [[`${key}_active`, form.days[key].active], [`${key}_start`, form.days[key].start], [`${key}_end`, form.days[key].end]]));
+    if (registry.kind === 'local') {
+      if (schedule && dataAdapter.updateSchedule) {
+        const { error } = await dataAdapter.updateSchedule({ work_start: form.days.monday.start, work_end: form.days.monday.end, break_start: form.break_start, break_end: form.break_end, ...dayValues });
+        if (error) { setSaveError('Programul de lucru nu a putut fi salvat.'); return; }
+      }
+      if (rates && dataAdapter.updateRates) {
+        const { error } = await dataAdapter.updateRates({ normal_rate: form.normal_rate, urgent_rate: form.urgent_rate, warranty_rate: form.warranty_rate, overtime_rate: form.overtime_rate, vat_rate: form.vat_rate });
+        if (error) { setSaveError('Tarifele nu au putut fi salvate.'); return; }
+      }
+      setMessage('Setările au fost salvate'); await onRefresh(); window.setTimeout(() => setMessage(''), 2500);
+      return;
+    }
     if (schedule) {
-      const dayValues = Object.fromEntries(scheduleDayFields.flatMap(({ key }) => [[`${key}_active`, form.days[key].active], [`${key}_start`, form.days[key].start], [`${key}_end`, form.days[key].end]]));
       const { error } = await supabase.from('work_schedule').update({ work_start: form.days.monday.start, work_end: form.days.monday.end, break_start: form.break_start, break_end: form.break_end, ...dayValues }).eq('id', schedule.id);
       if (error) { setSaveError('Programul de lucru nu a putut fi salvat.'); return; }
     }
@@ -2203,9 +2313,7 @@ function CarHistoryModal({ car, employees, rates, onClose, onRefresh }: { car: C
   const mileageLog = (car.mileage_log ?? []).sort((a: MileageLogEntry, b: MileageLogEntry) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime());
   useEffect(() => {
     const load = async (): Promise<void> => {
-      const [actRes] = await Promise.all([
-        supabase.from('activity_log').select('id, action, detail, created_at').eq('car_id', car.id).order('created_at', { ascending: true }),
-      ]);
+      const actRes = await dataAdapter.getCarActivityLog(car.id);
       setActivity((actRes.data ?? []) as Array<{ id: string; action: string; detail: string | null; created_at: string }>);
     };
     void load();
@@ -2360,19 +2468,18 @@ export default function App() {
   const [loadError, setLoadError] = useState('');
   const initialSession = typeof window !== 'undefined' ? localStorage.getItem('servix_session') : null;
   const [sessionChecked, setSessionChecked] = useState(false);
-
   const loadData = async (): Promise<void> => {
     setLoadError('');
     const [empRes, carRes, schedRes, ratesRes, themeRes, apptRes, makesRes, modelsRes, workRes] = await Promise.all([
-      supabase.from('employees').select('*').order('name'),
-      supabase.from('cars').select('*, jobs(*), plate_history(*), mileage_log(*), car_photos(*)').order('created_at', { ascending: false }),
-      supabase.from('work_schedule').select('*').eq('active', true).limit(1).maybeSingle(),
-      supabase.from('rates').select('*').eq('active', true).limit(1).maybeSingle(),
-      supabase.from('themes').select('*').order('name'),
-      supabase.from('appointments').select('*').order('appointment_date', { ascending: true }).order('appointment_time', { ascending: true }),
-      supabase.from('vehicle_makes').select('id, name, normalized_name').order('name'),
-      supabase.from('vehicle_models').select('id, make_id, name, normalized_name').order('name'),
-      supabase.from('work_catalog').select('id, name, normalized_name').order('name'),
+      dataAdapter.getEmployees(),
+      dataAdapter.getCars(),
+      dataAdapter.getSchedule(),
+      dataAdapter.getRates(),
+      dataAdapter.getThemes(),
+      dataAdapter.getAppointments(),
+      dataAdapter.getVehicleMakes(),
+      dataAdapter.getVehicleModels(),
+      dataAdapter.getWorkCatalog(),
     ]);
     // Surface Supabase errors instead of silently rendering empty data
     const firstError = empRes.error ?? carRes.error ?? schedRes.error ?? ratesRes.error ?? themeRes.error ?? apptRes.error;
@@ -2458,6 +2565,12 @@ export default function App() {
     localStorage.setItem('servix_session', `employee:${selected.id}`);
     setView('employee');
   };
+  const leaveSession = (): void => {
+    localStorage.removeItem('servix_session');
+    setEmployee(null);
+    setView('home');
+    if (typeof window !== 'undefined') window.history.pushState({}, '', '/');
+  };
   if (loading) return <div className="flex min-h-screen items-center justify-center bg-[var(--background)]"><div className="flex items-center gap-3 text-sm font-semibold text-[var(--text-secondary)]"><span className="h-2 w-2 animate-pulse rounded-full bg-[var(--button)]" /> Se încarcă SERVIX...</div></div>;
 
   if (loadError) return (
@@ -2477,20 +2590,15 @@ export default function App() {
 
   return view === 'home'
     ? <Landing employees={employees} onEmployee={chooseEmployee} onAdmin={() => {
-        localStorage.setItem('servix_session', 'admin');
         if (typeof window !== 'undefined') {
           window.history.pushState({}, '', '/admin');
         }
         setView('admin');
       }} />
     : view === 'employee' && employee
-      ? <PanouAngajat employee={employee} cars={cars} schedule={schedule} onRefresh={loadData} onChange={() => { localStorage.removeItem('servix_session'); setEmployee(null); setView('home'); if (typeof window !== 'undefined') { window.history.pushState({}, '', '/'); } }} />
+      ? <PanouAngajat employee={employee} cars={cars} schedule={schedule} onRefresh={loadData} onChange={leaveSession} />
       : <AdminPanel employees={employees} cars={cars} appointments={appointments} schedule={schedule} rates={rates} themes={themes} vehicleMakes={vehicleMakes} vehicleModels={vehicleModels} workCatalog={workCatalog} onRefresh={loadData} adminTheme={adminTheme} employeeTheme={employeeTheme} onChangeAdminTheme={changeAdminTheme} onChangeEmployeeTheme={changeEmployeeTheme} onExit={() => {
-        localStorage.removeItem('servix_session');
-        setView('home');
-        if (typeof window !== 'undefined') {
-          window.history.pushState({}, '', '/');
-        }
+        leaveSession();
       }} />;
 }
 
