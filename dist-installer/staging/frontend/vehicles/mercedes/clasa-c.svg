@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2C3442"/><stop offset="1" stop-color="#232A36"/></linearGradient>
+    <linearGradient id="p" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#20242E"/><stop offset="1" stop-color="rgba(0,0,0,0.28)"/></linearGradient>
+  </defs>
+  <rect width="320" height="240" rx="14" fill="url(#bg)"/>
+  <ellipse cx="160" cy="196" rx="120" ry="10" fill="rgba(0,0,0,0.35)"/>
+  <path d="M58 172 L54 134 Q54 120 68 116 L98 110 L120 80 Q127 70 140 70 L200 70 Q213 70 221 79 L246 106 L270 112 Q282 116 282 130 L278 172 Z" fill="url(#p)" stroke="rgba(255,255,255,0.18)" stroke-width="1.5"/>
+  <path d="M128 84 L156 84 L156 108 L110 108 Z" fill="#171A24"/><path d="M164 84 L196 84 Q203 84 208 90 L226 108 L164 108 Z" fill="#171A24"/>
+  <path d="M80 130 L260 130" stroke="rgba(255,255,255,0.14)" stroke-width="2" fill="none"/>
+  <circle cx="100" cy="176" r="20" fill="#171A24" stroke="#C9CDD6" stroke-width="5"/>
+  <circle cx="240" cy="176" r="20" fill="#171A24" stroke="#C9CDD6" stroke-width="5"/>
+  <circle cx="100" cy="176" r="10" fill="#59606D"/><circle cx="240" cy="176" r="10" fill="#59606D"/>
+  <text x="160" y="224" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700" fill="#A8B0BF" letter-spacing="2">MERCEDES CLASA C</text>
+</svg>

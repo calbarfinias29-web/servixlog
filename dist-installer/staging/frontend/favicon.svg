@@ -1,0 +1,38 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="20" y1="12" x2="236" y2="236" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#090B12"/>
+      <stop offset="1" stop-color="#161522"/>
+    </linearGradient>
+    <linearGradient id="silver" x1="36" y1="27" x2="204" y2="208" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F7F9FF"/>
+      <stop offset="0.2" stop-color="#D4D8E1"/>
+      <stop offset="0.5" stop-color="#A4ABBC"/>
+      <stop offset="0.8" stop-color="#EEF3FF"/>
+      <stop offset="1" stop-color="#FBFCFF"/>
+    </linearGradient>
+    <linearGradient id="purple" x1="34" y1="18" x2="204" y2="214" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F5E9FF"/>
+      <stop offset="0.15" stop-color="#D9AFFF"/>
+      <stop offset="0.35" stop-color="#A766FF"/>
+      <stop offset="0.6" stop-color="#7F3DFF"/>
+      <stop offset="1" stop-color="#F5EEFF"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <circle cx="128" cy="128" r="114" fill="url(#bg)"/>
+  <circle cx="128" cy="128" r="94" stroke="#B77BFF" stroke-opacity="0.35" stroke-width="3"/>
+
+  <g filter="url(#glow)">
+    <path d="M64 73L91 49L122 82L154 49L184 80L64 189L49 174L117 104L92 84L64 73Z" fill="url(#purple)"/>
+    <path d="M178 151L147 180L110 146L87 170L69 154L109 102L151 146L177 122L189 134L178 151Z" fill="url(#silver)"/>
+    <path d="M68 88L103 121L130 95L160 126L182 99L190 106L162 160L105 116L80 140L62 122L68 88Z" fill="url(#silver)" opacity="0.85"/>
+  </g>
+</svg>

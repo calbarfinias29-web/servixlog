@@ -1,0 +1,17 @@
+{
+  "name": "SERVIX",
+  "short_name": "SERVIX",
+  "description": "SERVIX • Atelier management",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090B12",
+  "theme_color": "#090B12",
+  "icons": [
+    {
+      "src": "/servix-logo12 (1).png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

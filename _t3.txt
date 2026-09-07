@@ -1,0 +1,10 @@
+40:function zonedMs(y: number, mo: number, d: number, h: number, mi: number): number {
+45:function inBreakNow(schedule: Schedule | null, ms: number): boolean {
+51:function afterHoursNow(schedule: Schedule | null, ms: number): boolean {
+57:function overtimeWindowOpen(schedule: Schedule | null, ms: number): boolean {
+79:    const W = (t: string): number => zonedMs(p.y, p.mo, p.d, Math.floor(minutesOf(t) / 60), minutesOf(t) % 60);
+84:    cursor = zonedMs(p.y, p.mo, p.d, 24, 0);
+152:export default function PanouAngajat({ employee, cars, schedule, onRefresh, onChange }: {
+207:  const breakActive = inBreakNow(schedule, now);
+208:  const afterHours = afterHoursNow(schedule, now);
+209:  const otWindowOpen = overtimeWindowOpen(schedule, now);

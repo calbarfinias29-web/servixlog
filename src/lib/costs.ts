@@ -1,5 +1,15 @@
 import type { Car, Job, Rates } from '@/types';
 
+export function roundMoney(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+export function calculateCostSummary(subtotal: number, vatRate: number): { subtotal: number; vatAmount: number; totalWithVat: number } {
+  const roundedSubtotal = roundMoney(subtotal);
+  const vatAmount = roundMoney(roundedSubtotal * vatRate / 100);
+  return { subtotal: roundedSubtotal, vatAmount, totalWithVat: roundMoney(roundedSubtotal + vatAmount) };
+}
+
 // Mutat VERBATIM din App.tsx — NU se creează formule paralele.
 // FIX: worked_seconds conține DOAR timp normal (nu se scade overtime_seconds)
 export function computeJobCost(job: Job, car: Car, rates: Rates | null): { normalSec: number; overtimeSec: number; normalRate: number; overtimeRate: number; normalCost: number; overtimeCost: number; totalSec: number; totalCost: number } {

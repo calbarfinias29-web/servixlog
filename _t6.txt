@@ -1,0 +1,17 @@
+59: function formatDuration(seconds: number): string {
+65: function formatShortDuration(seconds: number): string {
+701:   return <Modal title={`Detalii ${car.license_plate}`} onClose={onClose}><div className="space-y-6 p-6"><div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4"><div className="grid gap-3 sm:grid-cols-2"><div><p className="text-[10px] font-bold uppercase tracking-wide text-[var
+706:   return <div><div className="mb-5 flex items-center gap-3"><button onClick={onBack} className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:border-[var(--border)]"><ArrowLeft size={16} /> În
+898: <span className="font-mono text-sm" style={{ color: SV.sec }}>{formatShortDuration(totalWorkedSeconds(car.jobs))}</span>
+945: <span className="shrink-0 font-mono text-sm font-bold" style={{ color: SV.navy }}>{formatShortDuration(sec)}</span>
+983:   return <div className="overflow-hidden rounded-xl border bg-[var(--surface)] shadow-sm" style={{ borderColor: 'var(--border)' }}><div className="hidden grid-cols-[0.8fr_1.2fr_1fr_1fr_1fr_100px_1fr_1fr_1fr] gap-4 border-b bg-[var(--card)]/80 px-5 py-3 text-[10px] font-bold uppercase tracking-[0.14e
+1009:   return <><div className="mb-6"><h2 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Lucrări</h2><p className="mt-1 text-sm" style={{ color: 'var(--text-secondary)' }}>Toate lucrările din service, grupate pe mașini.</p></div><div className="mb-5 flex flex-wrap 
+1043:       lines.push(pdfRow('  Timp normal / Peste program', `${formatShortDuration(j.worked_seconds - (j.overtime_seconds ?? 0))} / ${formatShortDuration(j.overtime_seconds ?? 0)}  (finalizata: ${j.completed_at ? new Date(j.completed_at).toLocaleDateString('ro-RO') : '-'})`));
+1048:     pdfRow('Timp normal', formatShortDuration(normalSec)),
+1049:     pdfRow('Timp peste program', formatShortDuration(overtimeSec)),
+1050:     { text: `Timp total:  ${formatShortDuration(totalSec)}`, size: 12, bold: true },
+1131:     pdfRow('  Ore lucrate', `${formatShortDuration(o.totalSec)}  (normal ${formatShortDuration(o.normalSec)} / peste program ${formatShortDuration(o.overtimeSec)})`),
+1164:     lines.push({ text: `Total lucrare: ${occs.length} aparitii, ${formatShortDuration(totalSec)} ore, ${totalWithoutVat.toFixed(2)} lei`, size: 13, bold: true, gapBefore: 12 });
+1208:     lines.push(pdfRow('Ore totale', formatShortDuration(grandTotalSec)));
+1331: <div className="overflow-hidden rounded-[16px] border bg-[var(--surface)] shadow-sm" style={{ borderColor: SV.border }}><div className="border-b px-6 py-4" style={{ borderColor: SV.border }}><h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>Mașini finalizate ({finalizedCars.length})</
+2108: <div><h3 className="mb-3 text-sm font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Istoric mașină</h3><div className="mb-4 flex flex-wrap gap-2"><button onClick={() => setYearFilter('all')} className={`rounded-lg px-4 py-2 text-sm font-bold transition ${yearFilter === 'all' ? 'text

@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": ["node"],
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true
+  },
+  "include": ["src", "tests"]
+}

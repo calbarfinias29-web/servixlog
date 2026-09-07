@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { dataAdapter, type EmployeeTimeEntry } from '@/data';
 import type { Employee } from '@/types';
 
 /**
@@ -16,16 +16,6 @@ import type { Employee } from '@/types';
  * - Lucrările transferate: fiecare interval de timp are employee_id-ul propriu,
  *   deci timpul rămâne atribuit angajatului care l-a lucrat efectiv.
  */
-
-interface TimeEntryRow {
-  employee_id: string;
-  job_id: string;
-  start_time: string;
-  end_time: string | null;
-  duration_seconds: number | null;
-  is_overtime: boolean;
-  jobs: { car_id: string } | null;
-}
 
 function formatHours(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -79,20 +69,18 @@ export function EmployeeReportsTab({ employees }: { employees: Employee[] }) {
 
     setLoading(true);
     try {
-      let query = supabase
-        .from('time_entries')
-        .select('employee_id, job_id, start_time, end_time, duration_seconds, is_overtime, jobs!inner(car_id)')
-        .gte('start_time', startIso)
-        .lte('start_time', endIso);
-      if (employeeId !== 'all') query = query.eq('employee_id', employeeId);
-
-      const { data, error: qError } = await query;
+      const timeRes = await dataAdapter.getTimeEntries({
+        fromIso: startIso,
+        toIso: endIso,
+        employeeId: employeeId === 'all' ? undefined : employeeId,
+      });
+      const qError = timeRes.error;
       if (qError) {
         setError('Nu am putut încărca istoricul de timp. ' + qError.message);
         return;
       }
 
-      const entries = (data ?? []) as unknown as TimeEntryRow[];
+      const entries: EmployeeTimeEntry[] = timeRes.data ?? [];
       if (entries.length === 0) {
         setInfo('Nu există înregistrări de timp (time_entries) pentru perioada selectată. Atenție: lucrările pornite cu timerul acumulează timp doar în jobs.worked_seconds (per lucrare, nu per angajat) și apar aici doar dacă există intervale înregistrate în istoricul time_entries.');
         return;

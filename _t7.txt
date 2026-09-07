@@ -1,0 +1,33 @@
+38:-- safe_start_overtime: start overtime session on a job
+42:CREATE OR REPLACE FUNCTION safe_start_overtime(p_job_id uuid, p_employee_id uuid)
+99:REVOKE EXECUTE ON FUNCTION safe_start_overtime(uuid, uuid) FROM PUBLIC;
+100:GRANT EXECUTE ON FUNCTION safe_start_overtime(uuid, uuid) TO anon, authenticated;
+103:-- safe_stop_overtime: stop overtime, accumulate overtime_seconds
+105:CREATE OR REPLACE FUNCTION safe_stop_overtime(p_job_id uuid, p_employee_id uuid)
+141:REVOKE EXECUTE ON FUNCTION safe_stop_overtime(uuid, uuid) FROM PUBLIC;
+142:GRANT EXECUTE ON FUNCTION safe_stop_overtime(uuid, uuid) TO anon, authenticated;
+20260824115251_servix_initial_schema.sql
+20260824122127_servix_demo_data_support.sql
+20260824122207_servix_demo_write_protection.sql
+20260824122235_servix_demo_delete_functions.sql
+20260824122401_servix_demo_write_privileges.sql
+20260824134130_servix_safe_assign_car.sql
+20260824140347_servix_themes_and_expanded_demo.sql
+20260824141931_servix_employee_fields_and_history.sql
+20260824144030_servix_fix_safe_assign_and_demo_cars.sql.sql
+20260824144835_servix_safe_start_job.sql.sql
+20260824192129_servix_major_update_schema.sql.sql
+20260824192201_servix_backend_functions.sql.sql
+20260824192230_servix_demo_data_major.sql.sql
+20260824193921_servix_appointments_and_financial.sql.sql
+20260824193954_servix_grant_permissions.sql.sql
+20260825000000_servix_security_admin_auth_and_code_hash.sql
+20260825120000_servix_overtime_window_guard.sql
+20260825120100_servix_split_time_accounting.sql
+20260825120200_servix_fix_overtime_work_schedule.sql
+20260825130000_servix_car_photos.sql
+20260826120000_servix_employee_event_modes.sql
+20260828100000_servix_safe_update_job_status.sql
+20260831120000_servix_fix_cars_column_grants.sql
+20260901120000_servix_add_vat_rate.sql
+20260901130000_servix_takeover_and_transfer.sql

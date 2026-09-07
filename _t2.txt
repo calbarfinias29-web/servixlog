@@ -1,0 +1,21 @@
+src\PanouAngajat.tsx:56:// Fereastra legală pentru „CONTINUĂ PESTE PROGRAM”: 13:00–14:00 SAU 18:00–08:00.
+src\PanouAngajat.tsx:202:  // Separare strictă: worked_seconds = DOAR ore normale; overtime_seconds = DOAR peste program.
+src\PanouAngajat.tsx:205:  // (is_overtime=true prin „CONTINUĂ PESTE PROGRAM”). La 14:00 segmentul de overtime din pauză
+src\PanouAngajat.tsx:226:  // overtime_seconds NU se adaugă la totalul orelor normale — e afișat separat la „Timp peste program”.
+src\PanouAngajat.tsx:232:  else if (isOvertimeActive) { statusLabel = 'PESTE PROGRAM'; statusColor = 'var(--secondary)'; }
+src\PanouAngajat.tsx:322:      //   - overtime_seconds = doar timp peste program;
+src\PanouAngajat.tsx:362:  // „CONTINUĂ PESTE PROGRAM” / „OPREȘTE PESTE PROGRAM” — scrie EXCLUSIV prin
+src\PanouAngajat.tsx:370:  // separată server-side: worked_seconds = doar normal, overtime_seconds = doar peste program.
+src\PanouAngajat.tsx:383:        ? `Nu am putut porni lucrarea peste program. ${technicalError}`
+src\PanouAngajat.tsx:384:        : `Nu am putut opri lucrarea peste program. ${technicalError}`);
+src\PanouAngajat.tsx:531:                <span className="text-[11px] font-bold uppercase tracking-[0.12em]" style={{ color: 'var(--text-secondary)' }}>Timp peste program</span>
+src\PanouAngajat.tsx:542:            {/* CONTROALE TOUCH — rând 1: PAUZĂ + CONTINUĂ PESTE PROGRAM, rând 2: FINALIZEAZĂ + AȘTEPT PIESE */}
+src\PanouAngajat.tsx:547:                  <Btn bg={'var(--primary)'} icon={<Clock size={16} />} label="CONTINUĂ PESTE PROGRAM" onClick={() => void handleOvertime(activeJob, true)} disabled={busy !== null || !otWindowOpen || !running || isOvertimeActive} />
+src\PanouAngajat.tsx:599:                  <button onClick={() => void handleOvertime(activeJob, false)} disabled={busy !== null} className="h-[44px] w-full rounded-xl px-4 text-[14px] font-bold transition hover:brightness-110 disabled:opacity-50" style={{ background: 'var(--secondary)', color: 'var(--surface)' }}>OPREȘTE PESTE PROGRAM</button>
+src\PanouAngajat.tsx:610:                  <li className="flex items-start gap-2"><Check size={15} className="mt-0.5 flex-none" style={{ color: 'var(--primary)' }} />Poți continua peste program apăsând butonul dedicat.</li>
+FINDSTR: Cannot open PROGRAM
+FINDSTR: Cannot open /c:TIMP
+FINDSTR: Cannot open NORMAL
+FINDSTR: Cannot open /c:TIMP
+FINDSTR: Cannot open TOTAL
+FINDSTR: Cannot open /c:padStart

@@ -1,0 +1,33 @@
+13:import PanouAngajat from '@/PanouAngajat';
+18:function isInBreak(schedule: Schedule | null, date = new Date()): boolean {
+19:  if (!schedule) return false;
+21:  const bs = Number(schedule.break_start.slice(0, 2)) * 60 + Number(schedule.break_start.slice(3, 5));
+22:  const be = Number(schedule.break_end.slice(0, 2)) * 60 + Number(schedule.break_end.slice(3, 5));
+25:function isAfterHours(schedule: Schedule | null, date = new Date()): boolean {
+26:  if (!schedule) return false;
+28:  const we = Number(schedule.work_end.slice(0, 2)) * 60 + Number(schedule.work_end.slice(3, 5));
+31:function isOvertimeWindowFn(schedule: Schedule | null, date = new Date()): boolean {
+32:  if (!schedule) return false;
+33:  return isAfterHours(schedule, date) && !isInBreak(schedule, date);
+265:function EmployeePanel({ employee, cars, schedule, rates, employees, onRefresh, onChange }: { employee: Employee; cars: Car[]; schedule: Schedule | null; rates: Rates | null; employees: Employee[]; onRefresh: () => Promise<void>; onChange: () => void }) {
+284:  const breakActive = isInBreak(schedule, new Date(now));
+444:          {isBreak && <BreakBanner schedule={schedule} />}
+484:              <ScheduleDisplay schedule={schedule} />
+527:          {!isDone && !noJobs && isAfterHours(schedule, new Date(now)) && !isOvertimeActive && !isBreak && <button onClick={() => setShowOvertimeConfirm(true)} className="flex items-center justify-center gap-2 rounded-lg px-4 py-5 text-base font-bold text-white transition hover:brightness-110" style={{ background: '#7C3AED' }}><Clock size={20} /> CONTINUĂ PESTE PROGRAM</button>}
+673:function BreakBanner({ schedule }: { schedule: Schedule | null }) {
+674:  return <div className="rounded-xl p-5 shadow-sm" style={{ background: 'color-mix(in srgb, #F59E0B 12%, transparent)', border: '1px solid color-mix(in srgb, #F59E0B 35%, transparent)' }}><div className="flex items-center gap-3"><Coffee size={28} style={{ color: '#F59E0B' }} /><div><p className="text-lg font-bold uppercase tracking-[0.12em]" style={{ color: '#F59E0B' }}>PAUZĂ DE MASĂ AUTOMATĂ</p><p className="mt-0.5 text-sm font-semibold" style={{ color: '#FBBF24' }}>{schedule?.break_start.slice(0, 5) ?? '13:00'} – {schedule?.break_end.slice(0, 5) ?? '14:00'}</p></div><p className="ml-auto text-sm" style={{ color: 'var(--text-secondary)' }}>Se reia automat la {schedule?.break_end.slice(0, 5) ?? '14:00'}.</p></div></div>;
+677:function ScheduleDisplay({ schedule }: { schedule: Schedule | null }) {
+678:  if (!schedule) return null;
+683:      {row(`${schedule.work_start.slice(0, 5)} – ${schedule.break_start.slice(0, 5)}`, 'Lucru', 'var(--success)')}
+684:      {row(`${schedule.break_start.slice(0, 5)} – ${schedule.break_end.slice(0, 5)}`, 'Pauză', '#F59E0B')}
+685:      {row(`${schedule.break_end.slice(0, 5)} – ${schedule.work_end.slice(0, 5)}`, 'Lucru', 'var(--success)')}
+686:      {row(`după ${schedule.work_end.slice(0, 5)}`, 'Posibil ore suplimentare', '#7C3AED')}
+714:function AdminPanel({ employees, cars, appointments, schedule, rates, themes, onRefresh, onExit, adminTheme, employeeTheme, onChangeAdminTheme, onChangeEmployeeTheme }: { employees: Employee[]; cars: Car[]; appointments: Appointment[]; schedule: Schedule | null; rates: Rates | null; themes: Theme[]; onRefresh: () => Promise<void>; onExit: () => void; adminTheme: 'light' | 'dark'; employeeTheme: 'light' | 'dark'; onChangeAdminTheme: (m: 'light' | 'dark') => void; onChangeEmployeeTheme: (m: 'light' | 'dark') => void }) {
+778:  {activeTab === 'settings' && <SettingsView schedule={schedule} rates={rates} employees={employees} cars={cars} onRefresh={onRefresh} onGoToEmployees={() => setActiveTab('employees')} />}
+1890:function SettingsView({ schedule, rates, employees, cars, onRefresh, onGoToEmployees }: { schedule: Schedule | null; rates: Rates | null; employees: Employee[]; cars: Car[]; onRefresh: () => Promise<void>; onGoToEmployees?: () => void }) {
+1892:  const [form, setForm] = useState({ work_start: schedule?.work_start?.slice(0, 5) ?? '07:00', break_start: schedule?.break_start?.slice(0, 5) ?? '13:00', break_end: schedule?.break_end?.slice(0, 5) ?? '14:00', work_end: schedule?.work_end?.slice(0, 5) ?? '18:00', normal_rate: rates?.normal_rate ?? 100, urgent_rate: rates?.urgent_rate ?? 150, warranty_rate: rates?.warranty_rate ?? 0, overtime_rate: rates?.overtime_rate ?? 150, vat_rate: rates?.vat_rate ?? 21 });
+1894:    if (schedule) await supabase.from('work_schedule').update({ work_start: form.work_start, work_end: form.work_end, break_start: form.break_start, break_end: form.break_end }).eq('id', schedule.id);
+2187:  const [schedule, setSchedule] = useState<Schedule | null>(null);
+2206:      supabase.from('work_schedule').select('*').eq('active', true).limit(1).maybeSingle(),
+2318:      ? <PanouAngajat employee={employee} cars={cars} schedule={schedule} onRefresh={loadData} onChange={() => { localStorage.removeItem('servix_session'); setEmployee(null); setView('home'); if (typeof window !== 'undefined') { window.history.pushState({}, '', '/'); } }} />
+2319:      : <AdminPanel employees={employees} cars={cars} appointments={appointments} schedule={schedule} rates={rates} themes={themes} onRefresh={loadData} adminTheme={adminTheme} employeeTheme={employeeTheme} onChangeAdminTheme={changeAdminTheme} onChangeEmployeeTheme={changeEmployeeTheme} onExit={() => {

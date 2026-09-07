@@ -1,0 +1,17 @@
+40:-- Marks the job as is_overtime = true
+71:  IF v_job.status = 'in_lucru' AND v_job.started_at IS NOT NULL THEN
+72:    UPDATE jobs SET is_overtime = true WHERE id = p_job_id;
+76:  -- Accumulate previous worked time if had a started_at
+77:  IF v_job.started_at IS NOT NULL THEN
+79:    SET worked_seconds = worked_seconds + GREATEST(0, EXTRACT(EPOCH FROM (now() - started_at))::int),
+80:        started_at = now(),
+82:        is_overtime = true
+86:    SET started_at = now(),
+88:        is_overtime = true
+103:-- safe_stop_overtime: stop overtime, accumulate overtime_seconds
+120:  IF v_job.status != 'in_lucru' OR v_job.started_at IS NULL THEN
+124:  v_elapsed := GREATEST(0, EXTRACT(EPOCH FROM (now() - v_job.started_at))::int);
+127:  SET overtime_seconds = overtime_seconds + v_elapsed,
+128:      worked_seconds = worked_seconds + v_elapsed,
+129:      started_at = NULL,
+131:      is_overtime = false

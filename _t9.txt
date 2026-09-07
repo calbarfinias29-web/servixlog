@@ -1,0 +1,15 @@
+src/App.tsx 85: function totalWorkedSeconds(jobs: Job[] | undefined): number {
+src/App.tsx 479:                 {(isWorking || isBreak || isParts) && <p className="mt-1 text-[13px]" style={{ color: 'var(--text-secondary)' }}>{isBreak ? 'Pauza nu se adaugă la timpul lucrat.' : isParts ? 'Timpul d
+src/App.tsx 836:   const topEmployees = employees.filter((e: Employee) => e.role === 'employee').map((e: Employee) => ({ e, sec: cars.filter((c: Car) => c.assigned_employee_id === e.id).reduce((t: number, c: Car) => t
+src/App.tsx 886: <h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>Mașini — {activeCard.label} ({resultList.length})</h3>
+src/App.tsx 898: <span className="font-mono text-sm" style={{ color: SV.sec }}>{formatShortDuration(totalWorkedSeconds(car.jobs))}</span>
+src/App.tsx 983:   return <div className="overflow-hidden rounded-xl border bg-[var(--surface)] shadow-sm" style={{ borderColor: 'var(--border)' }}><div className="hidden grid-cols-[0.8fr_1.2fr_1fr_1fr_1fr_100px_1fr_1
+src/App.tsx 1019:   const totalSec = totalWorkedSeconds(car.jobs);
+src/App.tsx 1276:     setTransferMsg('Mașina a fost transferată — timpul lucrat rămâne păstrat.');
+src/App.tsx 1331: <div className="overflow-hidden rounded-[16px] border bg-[var(--surface)] shadow-sm" style={{ borderColor: SV.border }}><div className="border-b px-6 py-4" style={{ borderColor: SV.border }}><h3 class
+src/App.tsx 1376: <p className="mt-1 text-[11px]" style={{ color: SV.muted }}>Timpul deja lucrat rămâne păstrat în istoricul lucrării.</p>
+src/App.tsx 1467:     <div className="overflow-hidden rounded-xl border bg-[var(--surface)] shadow-sm" style={{ borderColor: 'var(--border)' }}><div className="hidden grid-cols-[80px_1fr_1fr_1fr_1fr_1fr_1fr_40px] gap-4
+src/App.tsx 1521:     {matchedCar && <div className="rounded-lg border border-[var(--accent)] bg-[color-mix(in_srgb,var(--primary)_12%,transparent)] p-4"><p className="text-xs font-bold uppercase tracking-wide text-[va
+src/App.tsx 1524:       <div className="mb-3 flex items-center justify-between"><p className="text-xs font-bold uppercase tracking-wide text-[var(--primary)]">Mașină nouă — introducere manuală</p><button onClick={() =>
+src/App.tsx 2168:   return <Modal title="Adaugă mașină" onClose={onClose}><div className="space-y-5 p-6"><div className="grid gap-4 sm:grid-cols-2"><Field label="Număr înmatriculare" value={form.license_plate} onChange
+src/ServiceDarkDashboard.tsx 164:                 <div className="text-[16px] font-bold" style={{ color: C.text }}>Mașini — {statusCards.find((s) => s.key === activeStatus)?.title} ({statusCards.find((s) => s.key === activeStatus)?.va

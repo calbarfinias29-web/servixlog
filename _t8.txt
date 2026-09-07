@@ -1,0 +1,8 @@
+541:   const inLucru = myCars.filter((c: Car) => getCarStatus(c.jobs ?? []) === 'in_lucru');
+572:     {inLucru.length > 0 && <div><h3 className="mb-3 text-sm font-bold uppercase tracking-[0.12em]" style={{ color: 'var(--text-secondary)' }}>ÎN LUCRU ({inLucru.length})</h3><div className="grid gap-3">{inLucru.map(renderCarCard)}</div></div>}
+747:     const inLucru = employeeCars.filter((c: Car) => getCarStatus(c.jobs ?? []) === 'in_lucru').length;
+754:     return { inLucru, finalizate, piese, intarziate };
+811:   const inLucruList = scoped.filter((c: Car) => getCarStatus(c.jobs ?? []) === 'in_lucru' && (c.jobs ?? []).some((j: Job) => j.status === 'in_lucru' && (!j.started_at || inRange(new Date(j.started_at)))));
+816:     { key: 'in_lucru', label: 'ÎN LUCRU', list: inLucruList, bg: 'color-mix(in srgb, var(--info) 10%, transparent)', dot: 'var(--info)', Icon: Clock3 },
+1228:   const inLucruCars = cars.filter((c: Car) => getCarStatus(c.jobs ?? []) === 'in_lucru');
+1334: <h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>În lucru ({inLucruCars.length})</h3>
