@@ -703,7 +703,7 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
               {activeJob ? (
                 <>
                   <Btn bg={'var(--primary)'} icon={<Pause size={16} />} label="PAUZĂ" onClick={() => void updateJob(activeJob, 'asteptare', 'pauza')} disabled={busy !== null} />
-                  <Btn bg={'var(--primary)'} icon={<Clock size={16} />} label="CONTINUĂ PESTE PROGRAM" onClick={() => void handleOvertime(activeJob, true)} disabled={busy !== null || !otWindowOpen || !running || isOvertimeActive} />
+                  <Btn bg={'var(--primary)'} icon={<Clock size={16} />} label="CONTINUĂ PESTE PROGRAM" onClick={() => void handleOvertime(activeJob, true)} disabled={busy !== null || !otWindowOpen || !activeJob || isOvertimeActive} />
                   <Btn bg={'var(--danger)'} icon={<CheckCircle2 size={16} />} label="FINALIZEZ LUCRAREA" onClick={() => void updateJob(activeJob, 'finalizat', 'finalizeaza')} disabled={busy !== null} />
                   <Btn bg={'var(--warning)'} icon={<Clock size={16} />} label="AȘTEPT PIESE" onClick={() => void updateJob(activeJob, 'asteptare_piese', 'piese')} disabled={busy !== null} />
                 </>
