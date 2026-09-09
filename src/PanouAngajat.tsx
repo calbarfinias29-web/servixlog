@@ -315,6 +315,7 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
   else if (isOvertimeActive) { statusLabel = 'PESTE PROGRAM'; statusColor = 'var(--secondary)'; }
   else if (running && breakActive) { statusLabel = 'PAUZĂ DE PRÂNZ'; statusColor = 'var(--warning)'; }
   else if (running && otWindowOpen) { statusLabel = 'PROGRAM ÎNCHEIAT'; statusColor = 'var(--secondary)'; }
+  else if (currentJob.status === 'in_lucru' && !running) { statusLabel = 'AȘTEAPTĂ RELUARE MANUALĂ'; statusColor = 'var(--warning)'; }
   else if (!activeJob && currentJob.status === 'asteptare_piese') { statusLabel = 'AȘTEPTARE PIESE'; statusColor = 'var(--warning)'; }
   else if (!activeJob && currentJob.status === 'asteptare') { statusLabel = 'ÎN AȘTEPTARE'; statusColor = 'var(--text-secondary)'; }
   else if (currentJob.status === 'finalizat') { statusLabel = 'FINALIZAT'; statusColor = 'var(--success)'; }
@@ -428,7 +429,10 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
         if (completedAt) patch.completed_at = completedAt;
         const { error: upErr } = await supabase.from('jobs').update(patch).eq('id', job.id);
         if (!upErr) {
-          await supabase.from('activity_log').insert({ employee_id: employee.id, car_id: job.car_id, job_id: job.id, action: status, detail: 'Angajatul a actualizat lucrarea' });
+          const statusDetail = status === 'asteptare' ? 'Lucrarea a fost pusă pe pauză'
+            : status === 'asteptare_piese' ? 'Lucrarea a fost trecută în așteptare'
+            : 'Lucrarea a fost finalizată';
+          await supabase.from('activity_log').insert({ employee_id: employee.id, car_id: job.car_id, job_id: job.id, action: status, detail: statusDetail });
           if (status === 'finalizat' && completedAt) await syncCarCompletion(job, completedAt);
           await onRefresh(); setBusy(null); return;
         }
@@ -645,7 +649,7 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
               {employee.avatar_url
                 ? <img src={employee.avatar_url} alt={employee.name} className="h-9 w-9 rounded-full border-2 object-cover" style={{ borderColor: 'var(--primary)' }} />
                 : <span className="flex h-9 w-9 items-center justify-center rounded-full text-[14px] font-bold" style={{ background: 'var(--card)', border: `1.5px solid ${'var(--primary)'}`, color: 'var(--secondary)' }}>{employee.name[0]}</span>}
-              <span className="flex items-center gap-1.5 text-[16px] font-extrabold" style={{ color: 'var(--warning)' }}><span className="hidden max-w-[170px] truncate sm:inline" style={{ color: 'var(--warning)' }}>{employee.name}</span><span className="h-2 w-2 rounded-full" style={{ background: 'var(--success)' }} /></span>
+              <span className="flex items-center gap-1.5 text-[19px] font-extrabold" style={{ color: 'var(--warning)' }}><span className="hidden max-w-[200px] truncate min-w-0 sm:inline" style={{ color: 'var(--warning)' }}>{employee.name}</span><span className="h-2 w-2 rounded-full" style={{ background: 'var(--success)' }} /></span>
               {onChange && (
                 <button
                   onClick={onChange}
@@ -700,7 +704,7 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
             </Card>
             {/* CONTROALE TOUCH — rând 1: PAUZĂ + CONTINUĂ PESTE PROGRAM, rând 2: FINALIZEAZĂ + AȘTEPT PIESE */}
             <div className="employee-controls grid grid-cols-2 gap-3">
-              {activeJob ? (
+              {activeJob && running ? (
                 <>
                   <Btn bg={'var(--primary)'} icon={<Pause size={16} />} label="PAUZĂ" onClick={() => void updateJob(activeJob, 'asteptare', 'pauza')} disabled={busy !== null} />
                   <Btn bg={'var(--primary)'} icon={<Clock size={16} />} label="CONTINUĂ PESTE PROGRAM" onClick={() => void handleOvertime(activeJob, true)} disabled={busy !== null || !otWindowOpen || !activeJob || isOvertimeActive} />

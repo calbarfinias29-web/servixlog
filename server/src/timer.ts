@@ -263,14 +263,16 @@ function startJob(db: DatabaseSync, body: Body, nowMs: number): TimerOutcome {
     db.prepare("UPDATE timer_sessions SET state = 'running', paused_at = NULL, stopped_at = NULL, is_overtime = 0, updated_at = ? WHERE id = ?").run(now, String(session.id));
     db.prepare('INSERT INTO timer_intervals (id, session_id, employee_id, started_at, kind) VALUES (?, ?, ?, ?, ?)').run(randomUUID(), String(session.id), identity.employeeId, now, 'normal');
     db.prepare("UPDATE jobs SET status = 'in_lucru', started_at = ?, is_overtime = 0, updated_at = ? WHERE id = ?").run(now, now, identity.jobId);
-    audit(db, job, identity.employeeId, 'in_lucru', 'Reluare cronometru lucrare', now);
+    // job.status = starea DINAINTE de reluare (citită mai sus, înainte de UPDATE) — distinge pauză vs așteptare piese.
+    const resumeDetail = String(job.status) === 'asteptare_piese' ? 'Lucrarea a fost reluată din așteptare' : 'Lucrarea a fost reluată';
+    audit(db, job, identity.employeeId, 'in_lucru', resumeDetail, now);
     return { status: 200, payload: { ok: true, job: getJob(db, identity.jobId), session: getSession(db, identity.jobId) } };
   }
   const sessionId = randomUUID();
   db.prepare('INSERT INTO timer_sessions (id, job_id, employee_id, started_at, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(sessionId, identity.jobId, identity.employeeId, now, 'running', now, now);
   db.prepare('INSERT INTO timer_intervals (id, session_id, employee_id, started_at, kind) VALUES (?, ?, ?, ?, ?)').run(randomUUID(), sessionId, identity.employeeId, now, 'normal');
   db.prepare("UPDATE jobs SET status = 'in_lucru', started_at = ?, is_overtime = 0, updated_at = ? WHERE id = ?").run(now, now, identity.jobId);
-  audit(db, job, identity.employeeId, 'in_lucru', 'Pornire cronometru lucrare', now);
+  audit(db, job, identity.employeeId, 'in_lucru', 'Cronometrul a fost pornit', now);
   return { status: 201, payload: { ok: true, job: getJob(db, identity.jobId), session: getSession(db, identity.jobId) } };
 }
 
@@ -293,7 +295,10 @@ function updateStatus(db: DatabaseSync, body: Body, nowMs: number): TimerOutcome
     .run(state, now, now, normal, overtime, now, String(session.id));
   db.prepare("UPDATE jobs SET status = ?, worked_seconds = ?, overtime_seconds = ?, started_at = NULL, is_overtime = 0, completed_at = CASE WHEN ? = 'finalizat' THEN COALESCE(completed_at, ?) ELSE completed_at END, updated_at = ? WHERE id = ?")
     .run(status, normal, overtime, status, now, now, identity.jobId);
-  audit(db, job, identity.employeeId, status, 'Angajatul a actualizat lucrarea', now);
+  const statusDetail = status === 'asteptare' ? 'Lucrarea a fost pusă pe pauză'
+    : status === 'asteptare_piese' ? 'Lucrarea a fost trecută în așteptare'
+    : 'Lucrarea a fost finalizată';
+  audit(db, job, identity.employeeId, status, statusDetail, now);
   if (status === 'finalizat') {
     const remaining = row(db, "SELECT COUNT(*) AS count FROM jobs WHERE car_id = ? AND status != 'finalizat'", String(job.car_id));
     if (Number(remaining?.count ?? 0) === 0) db.prepare('UPDATE cars SET completed_at = ?, updated_at = ? WHERE id = ?').run(now, now, String(job.car_id));
@@ -328,7 +333,7 @@ function startOvertime(db: DatabaseSync, body: Body, nowMs: number): TimerOutcom
   db.prepare('UPDATE timer_sessions SET normal_seconds = ?, is_overtime = 1, updated_at = ? WHERE id = ?').run(normal, now, String(session.id));
   db.prepare('INSERT INTO timer_intervals (id, session_id, employee_id, started_at, kind) VALUES (?, ?, ?, ?, ?)').run(randomUUID(), String(session.id), identity.employeeId, now, 'overtime');
   db.prepare('UPDATE jobs SET worked_seconds = ?, is_overtime = 1, started_at = ?, updated_at = ? WHERE id = ?').run(normal, now, now, identity.jobId);
-  audit(db, job, identity.employeeId, 'overtime_start', 'Ore peste program pornite', now);
+  audit(db, job, identity.employeeId, 'overtime_start', 'Orele peste program au fost pornite', now);
   return { status: 200, payload: { ok: true, job: getJob(db, identity.jobId), session: getSession(db, identity.jobId, identity.employeeId) } };
 }
 
@@ -346,7 +351,7 @@ function stopOvertime(db: DatabaseSync, body: Body, nowMs: number): TimerOutcome
   const overtime = Number(session.overtime_seconds) + amounts.overtime;
   db.prepare("UPDATE timer_sessions SET state = 'stopped', paused_at = ?, stopped_at = ?, overtime_seconds = ?, is_overtime = 0, updated_at = ? WHERE id = ?").run(now, now, overtime, now, String(session.id));
   db.prepare("UPDATE jobs SET overtime_seconds = ?, started_at = NULL, is_overtime = 0, status = 'asteptare', updated_at = ? WHERE id = ?").run(overtime, now, identity.jobId);
-  audit(db, job, identity.employeeId, 'overtime_stop', 'Ore peste program oprite', now);
+  audit(db, job, identity.employeeId, 'overtime_stop', 'Orele peste program au fost oprite', now);
   return { status: 200, payload: { ok: true, job: getJob(db, identity.jobId), session: row(db, 'SELECT * FROM timer_sessions WHERE id = ?', String(session.id)) } };
 }
 

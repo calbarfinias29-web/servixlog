@@ -160,3 +160,45 @@ test('timer local: adapter recovery survives server restart', async () => {
   const stopped = await new LocalDataAdapter(baseUrl).updateJobTimerStatus!({ job_id: 'job-restart', employee_id: 'emp-demo-1', status: 'asteptare' });
   assert.equal(stopped.error, null);
 });
+
+test('timer local: pornire -> pauza -> reluare -> pauza -> reluare logheaza 5 evenimente distincte in activity_log', async () => {
+  dx.db.prepare("INSERT INTO cars (id, license_plate, client_name, assigned_employee_id, created_at) VALUES ('car-crono', 'CRN-TEST', 'Crono Client', 'emp-demo-1', '2026-09-09T00:00:00.000Z')").run();
+  dx.db.prepare("INSERT INTO jobs (id, car_id, title, created_at) VALUES ('job-crono', 'car-crono', 'Job Cronologie', '2026-09-09T00:00:00.000Z')").run();
+  const identity = { job_id: 'job-crono', employee_id: 'emp-demo-1' };
+
+  const start = await post('/api/timer/start', identity);
+  assert.equal(start.status, 201);
+  const pause1 = await post('/api/timer/status', { ...identity, status: 'asteptare' });
+  assert.equal(pause1.status, 200);
+  const resume1 = await post('/api/timer/start', identity);
+  assert.equal(resume1.status, 200);
+  const pause2 = await post('/api/timer/status', { ...identity, status: 'asteptare' });
+  assert.equal(pause2.status, 200);
+  const resume2 = await post('/api/timer/start', identity);
+  assert.equal(resume2.status, 200);
+
+  const events = dx.db.prepare(
+    "SELECT action, detail, job_id, employee_id FROM activity_log WHERE job_id = 'job-crono' ORDER BY created_at",
+  ).all() as Array<{ action: string; detail: string; job_id: string; employee_id: string }>;
+
+  assert.equal(events.length, 5);
+  for (const event of events) {
+    assert.equal(event.job_id, 'job-crono');
+    assert.equal(event.employee_id, 'emp-demo-1');
+  }
+  assert.deepEqual(events.map((e) => [e.action, e.detail]), [
+    ['in_lucru', 'Cronometrul a fost pornit'],
+    ['asteptare', 'Lucrarea a fost pusă pe pauză'],
+    ['in_lucru', 'Lucrarea a fost reluată'],
+    ['asteptare', 'Lucrarea a fost pusă pe pauză'],
+    ['in_lucru', 'Lucrarea a fost reluată'],
+  ]);
+
+  // Sursa Admin (dataAdapter.getCarActivityLog) trebuie să arate exact aceleași 5 evenimente.
+  const adapter = new LocalDataAdapter(baseUrl);
+  const carActivity = await adapter.getCarActivityLog('car-crono');
+  assert.equal(carActivity.error, null);
+  assert.equal(carActivity.data?.length, 5);
+  assert.deepEqual((carActivity.data ?? []).map((e) => e.action), events.map((e) => e.action));
+});
+

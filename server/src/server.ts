@@ -15,6 +15,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createServer as createHttpServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { extname, join, resolve, sep } from 'node:path';
@@ -27,7 +28,7 @@ import { createDatabase } from './db.ts';
 import { authenticateDevice, dispatchDeviceRequest } from './devices.ts';
 import { eventForWrite, LocalEventBus } from './events.ts';
 import { SCHEMA_VERSION } from './schema.ts';
-import { dispatchWrite } from './write.ts';
+import { dispatchWrite, readJsonBody } from './write.ts';
 import { getTimerState, checkAutoSyncWindows } from './timer.ts';
 
 const CORS_ALLOWED_ORIGINS = new Set(['http://127.0.0.1:5173', 'http://localhost:5173']);
@@ -150,7 +151,7 @@ function localThemes(db: DatabaseSync): unknown[] {
 /** FAZA 5 — activity_log filtrat pe carId, ordonat cronologic (ca în SupabaseDataAdapter). */
 function activityLogForCar(db: DatabaseSync, carId: string): unknown[] {
   return db
-    .prepare('SELECT id, action, detail, created_at FROM activity_log WHERE car_id = ? ORDER BY created_at ASC')
+    .prepare('SELECT id, action, detail, created_at, employee_id, job_id FROM activity_log WHERE car_id = ? ORDER BY created_at ASC')
     .all(carId) as unknown[];
 }
 
@@ -259,6 +260,29 @@ export function createApp(db: DatabaseSync, startedAt = new Date(), options: Loc
         sendJson(res, auth.status, auth.payload);
         return;
       }
+    }
+
+    if (method === 'POST' && path === '/api/inactivity/observe') {
+      const parsed = await readJsonBody(req);
+      if (parsed.error) { sendJson(res, parsed.error.status, parsed.error.payload); return; }
+      const body = parsed.body ?? {};
+      const employeeIds = Array.isArray(body.employee_ids) ? body.employee_ids.filter((id): id is string => typeof id === 'string') : [];
+      const observedAt = typeof body.observed_at === 'string' ? body.observed_at : new Date().toISOString();
+      try {
+        sendJson(res, 200, { ok: true, ...inactivityNotifications(db, employeeIds, observedAt) });
+      } catch (error) {
+        sendJson(res, 400, { ok: false, error: error instanceof Error ? error.message : 'Invalid inactivity observation.' });
+      }
+      return;
+    }
+
+    if (method === 'PATCH' && /^\/api\/inactivity\/notifications\/[^/]+$/.test(path)) {
+      const notificationId = decodeURIComponent(path.split('/').pop() ?? '');
+      db.prepare('UPDATE employee_inactivity_notifications SET read_at = COALESCE(read_at, ?) WHERE id = ?').run(new Date().toISOString(), notificationId);
+      const notification = db.prepare('SELECT * FROM employee_inactivity_notifications WHERE id = ?').get(notificationId);
+      if (!notification) { sendJson(res, 404, { ok: false, error: 'Notification not found.' }); return; }
+      sendJson(res, 200, { ok: true, notification });
+      return;
     }
 
     // FAZA 7A — WRITE local (POST create / PATCH update), validat pe server.
@@ -397,6 +421,13 @@ export function createApp(db: DatabaseSync, startedAt = new Date(), options: Loc
         return;
       }
 
+      case '/api/inactivity-notifications': {
+        const unreadOnly = url.searchParams.get('unreadOnly') !== 'false';
+        const notifications = listInactivityNotifications(db, unreadOnly);
+        sendJson(res, 200, { count: notifications.length, notifications });
+        return;
+      }
+
       default:
         sendJson(res, 404, { ok: false, error: 'Not Found' });
         return;
@@ -446,4 +477,52 @@ if (isMain()) {
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+}
+
+const INACTIVITY_THRESHOLDS_MINUTES = [10, 20, 30] as const;
+
+function inactivityNotifications(db: DatabaseSync, employeeIds: string[], observedAt: string): { created: unknown[]; unread: unknown[] } {
+  const observedMs = new Date(observedAt).getTime();
+  if (!Number.isFinite(observedMs)) throw new Error('observed_at invalid');
+  const eligible = new Set(employeeIds.filter((id) => typeof id === 'string' && id.trim()));
+  const created: unknown[] = [];
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const openPeriods = db.prepare('SELECT id, employee_id FROM employee_inactivity_periods WHERE ended_at IS NULL').all() as Array<{ id: string; employee_id: string }>;
+    for (const period of openPeriods) {
+      if (!eligible.has(period.employee_id)) db.prepare('UPDATE employee_inactivity_periods SET ended_at = ? WHERE id = ? AND ended_at IS NULL').run(observedAt, period.id);
+    }
+    for (const employeeId of eligible) {
+      let period = db.prepare('SELECT id, started_at FROM employee_inactivity_periods WHERE employee_id = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1').get(employeeId) as { id: string; started_at: string } | undefined;
+      if (!period) {
+        const id = randomUUID();
+        db.prepare('INSERT INTO employee_inactivity_periods (id, employee_id, started_at, created_at) VALUES (?, ?, ?, ?)').run(id, employeeId, observedAt, observedAt);
+        period = { id, started_at: observedAt };
+      }
+      const elapsedMinutes = Math.floor((observedMs - new Date(period.started_at).getTime()) / 60000);
+      if (elapsedMinutes < 0) continue;
+      for (const threshold of INACTIVITY_THRESHOLDS_MINUTES) {
+        if (elapsedMinutes < threshold) continue;
+        const notificationId = randomUUID();
+        const result = db.prepare(`
+          INSERT INTO employee_inactivity_notifications (id, employee_id, period_id, threshold_minutes, created_at)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT (period_id, threshold_minutes) DO NOTHING
+        `).run(notificationId, employeeId, period.id, threshold, observedAt);
+        if (Number(result.changes) > 0) {
+          created.push(db.prepare('SELECT * FROM employee_inactivity_notifications WHERE id = ?').get(notificationId));
+        }
+      }
+    }
+    const unread = db.prepare('SELECT * FROM employee_inactivity_notifications WHERE read_at IS NULL ORDER BY created_at DESC').all();
+    db.exec('COMMIT');
+    return { created, unread };
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function listInactivityNotifications(db: DatabaseSync, unreadOnly: boolean): unknown[] {
+  return db.prepare(`SELECT * FROM employee_inactivity_notifications ${unreadOnly ? 'WHERE read_at IS NULL' : ''} ORDER BY created_at DESC`).all();
 }

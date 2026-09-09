@@ -11,7 +11,7 @@
  * Tabele pilot: employees, cars, jobs, appointments, rates, work_schedule.
  */
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS employees (
@@ -360,6 +360,8 @@ export function migrateSchema(db: { exec(sql: string): void; prepare(sql: string
       CREATE TABLE IF NOT EXISTS car_photos (id TEXT PRIMARY KEY, car_id TEXT NOT NULL REFERENCES cars(id) ON DELETE CASCADE, storage_key TEXT NOT NULL, file_name TEXT, mime_type TEXT, size_bytes INTEGER, created_at TEXT NOT NULL, is_demo INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS employee_event_settings (employee_id TEXT PRIMARY KEY REFERENCES employees(id) ON DELETE CASCADE, work_start_mode TEXT NOT NULL DEFAULT 'auto' CHECK (work_start_mode IN ('auto', 'manual')), break_start_mode TEXT NOT NULL DEFAULT 'auto' CHECK (break_start_mode IN ('auto', 'manual')), break_end_mode TEXT NOT NULL DEFAULT 'auto' CHECK (break_end_mode IN ('auto', 'manual')), work_end_mode TEXT NOT NULL DEFAULT 'auto' CHECK (work_end_mode IN ('auto', 'manual')));
       CREATE TABLE IF NOT EXISTS session_event_log (id TEXT PRIMARY KEY, employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE, event_date TEXT NOT NULL, event_type TEXT NOT NULL, job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL, created_at TEXT NOT NULL, UNIQUE (employee_id, event_date, event_type, job_id));
+      CREATE TABLE IF NOT EXISTS employee_inactivity_periods (id TEXT PRIMARY KEY, employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE, started_at TEXT NOT NULL, ended_at TEXT, created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS employee_inactivity_notifications (id TEXT PRIMARY KEY, employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE, period_id TEXT NOT NULL REFERENCES employee_inactivity_periods(id) ON DELETE CASCADE, threshold_minutes INTEGER NOT NULL CHECK (threshold_minutes IN (10, 20, 30)), created_at TEXT NOT NULL, read_at TEXT, UNIQUE (period_id, threshold_minutes));
       CREATE TABLE IF NOT EXISTS devices (device_id TEXT PRIMARY KEY, device_type TEXT NOT NULL CHECK (device_type IN ('MAIN_PC', 'PC_COMPANION', 'TABLET', 'PHONE')), device_name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paired', 'revoked')), credential_salt TEXT NOT NULL, credential_hash TEXT NOT NULL, api_version TEXT NOT NULL, created_at TEXT NOT NULL, paired_at TEXT, last_seen_at TEXT, revoked_at TEXT);
       CREATE TABLE IF NOT EXISTS local_service (service_id TEXT PRIMARY KEY, created_at TEXT NOT NULL);
       CREATE UNIQUE INDEX IF NOT EXISTS ux_timer_sessions_active_job ON timer_sessions(job_id) WHERE state IN ('running', 'paused');
@@ -372,8 +374,10 @@ export function migrateSchema(db: { exec(sql: string): void; prepare(sql: string
       CREATE INDEX IF NOT EXISTS idx_mileage_log_car ON mileage_log(car_id);
       CREATE INDEX IF NOT EXISTS idx_car_photos_car ON car_photos(car_id);
       CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status);
+      CREATE INDEX IF NOT EXISTS idx_inactivity_period_employee_open ON employee_inactivity_periods(employee_id, ended_at);
+      CREATE INDEX IF NOT EXISTS idx_inactivity_notifications_unread ON employee_inactivity_notifications(read_at, created_at);
     `);
-    db.exec('PRAGMA user_version = 5;');
+    db.exec('PRAGMA user_version = 6;');
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');

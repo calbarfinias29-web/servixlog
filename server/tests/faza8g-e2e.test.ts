@@ -581,6 +581,49 @@ describe('H. Write Operations', () => {
     const del = await fetch(`${baseUrl}/api/appointments/${apptId}`, { method: 'DELETE' });
     assert.equal(del.status, 200);
   });
+
+  test('H6. Work catalog upsert dedupes on normalized_name', async () => {
+    const before = count('work_catalog');
+    const first = await post('/api/work-catalog', { name: 'Schimbare bucșe' });
+    assert.equal(first.status, 201);
+    const again = await post('/api/work-catalog', { name: 'schimbare  BUCȘE' });
+    assert.equal(again.status, 200);
+    assert.equal(again.json.catalog.id, first.json.catalog.id, 'same normalized_name must not duplicate the entry');
+    assert.equal(count('work_catalog'), before + 1);
+  });
+
+  test('H7. Mileage log entry recorded against an existing car', async () => {
+    const created = await post('/api/cars', { license_plate: `ML-${Date.now()}`, client_name: 'Mileage Test', mileage: 100000 });
+    const carId = created.json.car.id;
+    const res = await post('/api/mileage-log', { car_id: carId, mileage: 100500 });
+    assert.equal(res.status, 201);
+    assert.equal(res.json.entry.car_id, carId);
+    assert.equal(res.json.entry.mileage, 100500);
+  });
+
+  test('H8. Mileage log rejects unknown car_id', async () => {
+    const res = await post('/api/mileage-log', { car_id: 'no-such-car', mileage: 100 });
+    assert.equal(res.status, 422);
+  });
+
+  test('H9. Reusing an existing car (update mileage + add job) does not create a duplicate', async () => {
+    const plate = `RU-${Date.now()}`;
+    const created = await post('/api/cars', { license_plate: plate, client_name: 'Reuse Test', mileage: 185420 });
+    const carId = created.json.car.id;
+    const before = count('cars');
+
+    const updated = await fetch(`${baseUrl}/api/cars/${carId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mileage: 186000 }),
+    });
+    assert.equal(updated.status, 200);
+    await post('/api/mileage-log', { car_id: carId, mileage: 186000 });
+    const newJob = await post('/api/jobs', { car_id: carId, title: 'Schimbare pivot' });
+    assert.equal(newJob.status, 201);
+
+    assert.equal(count('cars'), before, 'no duplicate car row should be created on reuse');
+    const carAfter = row('cars', carId) as Record<string, unknown>;
+    assert.equal(carAfter.mileage, 186000);
+  });
 });
 
 

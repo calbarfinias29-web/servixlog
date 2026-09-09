@@ -17,6 +17,7 @@ import type { PostgrestError } from '@supabase/supabase-js';
 
 import type { Appointment, Car, Employee, Job, Rates, Schedule, Theme } from '../types.ts';
 import type { PairingConfiguration } from '../devicePairing.ts';
+import type { EmployeeInactivityNotification, InactivityObservationResult } from '../lib/employeeInactivity.ts';
 
 export interface CatalogOption {
   id: string;
@@ -37,6 +38,10 @@ export interface CarActivityEntry {
   action: string;
   detail: string | null;
   created_at: string;
+  /** Angajatul responsabil (dacă evenimentul a fost înregistrat cu unul). */
+  employee_id?: string | null;
+  /** Lucrarea la care se referă evenimentul (opțional — evenimente per mașină). */
+  job_id?: string | null;
 }
 
 /**
@@ -208,10 +213,16 @@ export interface DeviceListResult {
 }
 
 export interface DataAdapterWrites {
+  observeEmployeeInactivity?(employeeIds: string[], observedAt?: string): Promise<QueryResult<InactivityObservationResult>>;
+  markEmployeeInactivityNotificationRead?(notificationId: string): Promise<QueryResult<EmployeeInactivityNotification>>;
   createCar?(input: CarWriteInput): Promise<QueryResult<Car>>;
   updateCar?(id: string, input: CarUpdateInput): Promise<QueryResult<Car>>;
   createJob?(input: JobWriteInput): Promise<QueryResult<Job>>;
   updateJob?(id: string, input: JobUpdateInput): Promise<QueryResult<Job>>;
+  /** Memorează o denumire de lucrare pentru autocomplete (dedupe pe normalized_name). */
+  upsertWorkCatalog?(name: string): Promise<QueryResult<CatalogOption>>;
+  /** Adaugă o intrare de kilometraj (istoric) pentru o mașină. */
+  addMileageLog?(input: { car_id: string; mileage: number }): Promise<QueryResult<{ id: string; car_id: string; mileage: number }>>;
   createEmployee?(input: EmployeeWriteInput): Promise<QueryResult<Employee>>;
   updateEmployee?(id: string, input: EmployeeUpdateInput): Promise<QueryResult<Employee>>;
   createAppointment?(input: AppointmentWriteInput): Promise<QueryResult<Appointment>>;
@@ -234,6 +245,7 @@ export interface DataAdapterWrites {
 }
 
 export interface DataAdapter extends DataAdapterWrites {
+  getEmployeeInactivityNotifications?(unreadOnly?: boolean): Promise<QueryResult<EmployeeInactivityNotification[]>>;
   /** Angajații activi (toate câmpurile), ordonați pe nume. */
   getEmployees(): Promise<QueryResult<Employee[]>>;
   /**

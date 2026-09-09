@@ -1,6 +1,6 @@
 ﻿import { createElement, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowLeft, ArrowRight, Bell, BriefcaseBusiness, CarFront, Check,
+  ArrowLeft, ArrowRight, Bell as BellIcon, BriefcaseBusiness, CarFront, Check,
   Clock3, Cog, Coffee, LogOut, Package, PanelLeft, Pause, Play, Plus, Search,
   Settings, ShieldCheck, Trash2, UserRound, Users, Wrench, X, Zap,
   Palette, FileBarChart, Calendar, AlertTriangle, Save, FileText, Image,
@@ -8,7 +8,7 @@ import {
   UserPlus, Mail, Phone, Coins, MoreVertical, ChevronDown, DollarSign, SlidersHorizontal, Percent,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { dataAdapter, registry } from '@/data';
+import { dataAdapter, registry, type CarActivityEntry, type EmployeeTimeEntry } from '@/data';
 import type { Car, CarStatus, Employee, EmployeeEventSettings, EventMode, Job, JobStatus, Priority, Rates, Schedule, ScheduleDay, Theme, ThemeColors, View, FinancialStatus, FuelLevel, PlateHistoryEntry, MileageLogEntry, Appointment, AppointmentStatus, CarPhoto } from '@/types';
 import { generateReportPdf, title as pdfTitle, heading as pdfHeading, row as pdfRow, type PdfLine } from '@/lib/pdf';
 import PanouAngajat, { fmt as fmtHMS, getScheduleDay, overlapSeconds } from '@/PanouAngajat';
@@ -18,6 +18,7 @@ import { VEHICLE_MAKES, modelsFor } from '@/lib/vehicleCatalog';
 import ServiceDarkDashboard from '@/ServiceDarkDashboard';
 import { EmployeeReportsTab } from '@/EmployeeReportsTab';
 import { normalizeSearch, searchIncludes } from '@/lib/search';
+import { eligibleInactivityEmployeeIds, type EmployeeInactivityNotification } from '@/lib/employeeInactivity';
 import { Modal, IconButton } from '@/components/Modal';
 import { formatShortDuration } from '@/lib/format';
 import { calculateCostSummary, computeJobCost } from '@/lib/costs';
@@ -338,7 +339,10 @@ function EmployeePanel({ employee, cars, schedule, rates, employees, onRefresh, 
         if (carErr) setStartError('Lucrarea a fost finalizată, dar nu am putut sincroniza mașina.');
       }
     }
-    await supabase.from('activity_log').insert({ employee_id: employee.id, car_id: job.car_id, job_id: job.id, action: status, detail: `${employee.name} a actualizat lucrarea` });
+    const statusDetail = status === 'asteptare' ? 'Lucrarea a fost pusă pe pauză'
+      : status === 'asteptare_piese' ? 'Lucrarea a fost trecută în așteptare'
+      : 'Lucrarea a fost finalizată';
+    await supabase.from('activity_log').insert({ employee_id: employee.id, car_id: job.car_id, job_id: job.id, action: status, detail: statusDetail });
     await onRefresh();
   };
   const handleStart = async (job: Job): Promise<void> => {
@@ -785,6 +789,36 @@ function DevicesView(): JSX.Element {
 // ============================================================
 type AdminTab = 'dashboard' | 'employees' | 'cars' | 'jobs' | 'reports' | 'appointments' | 'themes' | 'settings' | 'devices';
 
+let adminBellNotifications: EmployeeInactivityNotification[] = [];
+let adminBellEmployeeName: (id: string) => string = () => 'Nealocat';
+let adminBellRead: (id: string) => Promise<void> = async () => undefined;
+const adminBellListeners = new Set<(notifications: EmployeeInactivityNotification[]) => void>();
+
+function publishAdminBell(notifications: EmployeeInactivityNotification[], employeeName: (id: string) => string, onRead: (id: string) => Promise<void>): void {
+  adminBellNotifications = notifications;
+  adminBellEmployeeName = employeeName;
+  adminBellRead = onRead;
+  adminBellListeners.forEach((listener) => listener(notifications));
+}
+
+function Bell({ size = 19 }: { size?: number }) {
+  const [notifications, setNotifications] = useState(adminBellNotifications);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const listener = (next: EmployeeInactivityNotification[]): void => setNotifications(next);
+    adminBellListeners.add(listener);
+    return () => { adminBellListeners.delete(listener); };
+  }, []);
+  return <span className="relative inline-flex" onClick={() => setOpen((value) => !value)}>
+    <BellIcon size={size} />
+    {notifications.length > 0 && <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-orange-500 px-1 text-[9px] font-bold text-white">{notifications.length > 99 ? '99+' : notifications.length}</span>}
+    {open && <span className="absolute right-0 top-8 z-50 block w-[min(360px,calc(100vw-2rem))] overflow-hidden rounded-xl border bg-[var(--surface)] text-left shadow-xl" onClick={(event) => event.stopPropagation()} style={{ borderColor: 'var(--border)' }}>
+      <span className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: 'var(--border)' }}><span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Notificări</span><span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{notifications.length} necitite</span></span>
+      {notifications.length === 0 ? <span className="block px-4 py-5 text-sm" style={{ color: 'var(--text-secondary)' }}>Nu există notificări noi.</span> : <span className="block max-h-80 overflow-y-auto">{notifications.map((notification) => <span key={notification.id} role="button" tabIndex={0} onClick={() => void adminBellRead(notification.id)} onKeyDown={(event) => { if (event.key === 'Enter') void adminBellRead(notification.id); }} className="block border-b px-4 py-3 transition hover:bg-[var(--surface-secondary)]" style={{ borderColor: 'var(--border)' }}><span className="block text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{adminBellEmployeeName(notification.employee_id)} este activ de {notification.threshold_minutes === 10 ? '10 minute' : `${notification.threshold_minutes} de minute`} și nu a preluat nicio mașină.</span><span className="mt-1 block text-xs" style={{ color: 'var(--text-secondary)' }}>{new Date(notification.created_at).toLocaleString('ro-RO')}</span></span>)}</span>}
+    </span>}
+  </span>;
+}
+
 function AdminPanel({ employees, cars, appointments, schedule, rates, themes, vehicleMakes, vehicleModels, workCatalog, onRefresh, onExit, adminTheme, employeeTheme, onChangeAdminTheme, onChangeEmployeeTheme }: { employees: Employee[]; cars: Car[]; appointments: Appointment[]; schedule: Schedule | null; rates: Rates | null; themes: Theme[]; vehicleMakes: CatalogOption[]; vehicleModels: CatalogOption[]; workCatalog: CatalogOption[]; onRefresh: () => Promise<void>; onExit: () => void; adminTheme: 'light' | 'dark'; employeeTheme: 'light' | 'dark'; onChangeAdminTheme: (m: 'light' | 'dark') => void; onChangeEmployeeTheme: (m: 'light' | 'dark') => void }) {
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
   const [query, setQuery] = useState('');
@@ -802,6 +836,34 @@ function AdminPanel({ employees, cars, appointments, schedule, rates, themes, ve
   // CEAS în bara de sus (aceeași logică ca Panoul Angajat): 1s tick + curățat la unmount.
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const id = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(id); }, []);
+
+  const [inactivityNotifications, setInactivityNotifications] = useState<EmployeeInactivityNotification[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const observe = async (): Promise<void> => {
+      const observed = registry.kind === 'local'
+        ? await dataAdapter.observeEmployeeInactivity?.(eligibleInactivityEmployeeIds(employees, cars, schedule, new Date()))
+        : await (dataAdapter.observeEmployeeInactivity as (() => Promise<{ data: { unread: EmployeeInactivityNotification[] } | null; error: unknown }>) | undefined)?.();
+      if (!cancelled && observed?.data) {
+        setInactivityNotifications(observed.data.unread);
+        publishAdminBell(observed.data.unread, employeeName, readInactivityNotification);
+      }
+    };
+    void observe();
+    const id = window.setInterval(() => void observe(), 10_000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, [employees, cars, schedule]);
+
+  const readInactivityNotification = async (id: string): Promise<void> => {
+    const result = await dataAdapter.markEmployeeInactivityNotificationRead?.(id);
+    if (!result?.error) {
+      setInactivityNotifications((current) => {
+        const next = current.filter((notification) => notification.id !== id);
+        publishAdminBell(next, employeeName, readInactivityNotification);
+        return next;
+      });
+    }
+  };
 
   const employeeName = (id: string | null): string => employees.find((e: Employee) => e.id === id)?.name ?? 'Nealocat';
 
@@ -857,7 +919,7 @@ function AdminPanel({ employees, cars, appointments, schedule, rates, themes, ve
   {activeTab === 'themes' && <ThemesView themes={themes} onRefresh={onRefresh} adminTheme={adminTheme} employeeTheme={employeeTheme} onChangeAdminTheme={onChangeAdminTheme} onChangeEmployeeTheme={onChangeEmployeeTheme} />}
   {activeTab === 'settings' && <SettingsView schedule={schedule} rates={rates} employees={employees} cars={cars} onRefresh={onRefresh} onGoToEmployees={() => setActiveTab('employees')} />}
   {activeTab === 'devices' && registry.kind === 'local' && <DevicesView />}
-  </main></div>{showAdd && <AddCarModal employees={employees} vehicleMakes={vehicleMakes} vehicleModels={vehicleModels} workCatalog={workCatalog} onClose={() => setShowAdd(false)} onSaved={async () => { setShowAdd(false); await onRefresh(); }} />}{historyCar && <CarHistoryModal car={historyCar} employees={employees} rates={rates} onClose={() => setHistoryCar(null)} onRefresh={onRefresh} onEdit={() => setEditCarState(historyCar)} />}{editCarState && <EditCarModal car={editCarState} employees={employees} vehicleMakes={vehicleMakes} vehicleModels={vehicleModels} workCatalog={workCatalog} onClose={() => setEditCarState(null)} onSaved={async (updated) => { setEditCarState(null); if (updated) setHistoryCar(updated); await onRefresh(); }} />}{showAgent && <AgentModal onClose={() => setShowAgent(false)} />}</div>;
+  </main></div>{showAdd && <AddCarModal cars={cars} employees={employees} vehicleMakes={vehicleMakes} vehicleModels={vehicleModels} workCatalog={workCatalog} onClose={() => setShowAdd(false)} onSaved={async () => { setShowAdd(false); await onRefresh(); }} />}{historyCar && <CarHistoryModal car={historyCar} employees={employees} rates={rates} onClose={() => setHistoryCar(null)} onRefresh={onRefresh} onEdit={() => setEditCarState(historyCar)} />}{editCarState && <EditCarModal car={editCarState} employees={employees} vehicleMakes={vehicleMakes} vehicleModels={vehicleModels} workCatalog={workCatalog} onClose={() => setEditCarState(null)} onSaved={async (updated) => { setEditCarState(null); if (updated) setHistoryCar(updated); await onRefresh(); }} />}{showAgent && <AgentModal onClose={() => setShowAgent(false)} />}</div>;
 }
 
 // ============================================================
@@ -1070,7 +1132,7 @@ function DashboardView({ employees, cars, appointments, rates, schedule, employe
 </div>
 {activeStatus === 'in_lucru' && <div className="order-4"><LiveMonitorSection cars={cars} employees={employees} schedule={schedule} employeeName={employeeName} onRefresh={onRefresh} onDetails={(job, car) => setDashDetails({ job, car })} onChangeAllocation={(job, car) => setDashChangeAlloc({ job, car })} /></div>}
 {activeStatus === 'finalizata' && <div className="order-4 rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}><h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>Mașini — FINALIZATE ASTĂZI ({finalizedTodayJobs.length})</h3>{finalizedTodayJobs.length === 0 ? <p className="mt-4 py-4 text-center text-sm" style={{ color: SV.sec }}>Nu există mașini finalizate astăzi.</p> : <div className="mt-4 space-y-3">{finalizedTodayJobs.map(({ car, job }) => <div key={job.id} className="grid grid-cols-1 gap-3 rounded-xl border p-3.5 sm:grid-cols-[1fr_1fr_1fr_1fr_auto] sm:items-center" style={{ borderColor: SV.border }}><span className="text-sm font-semibold" style={{ color: SV.navy }}>{car.client_name}</span><span className="text-sm" style={{ color: SV.sec }}>{car.make} {car.model}</span><span className="text-sm font-bold" style={{ color: SV.navy }}>{car.license_plate}</span><span className="text-xs" style={{ color: SV.sec }}>{new Date(job.completed_at!).toLocaleString('ro-RO')} • {employeeName(car.assigned_employee_id)}</span><div className="flex justify-end"><button onClick={() => setDashDetails({ job, car })} className="rounded-lg border px-3 py-1.5 text-xs font-bold transition hover:bg-[var(--surface-secondary)]" style={{ borderColor: SV.border, color: SV.purple }}>Detalii</button></div></div>)}</div>}</div>}
-<div className="order-10 rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}>
+<div className="order-1 rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: SV.border }}>
 <h3 className="text-[18px] font-bold" style={{ color: SV.navy }}>Acțiuni rapide</h3>
 <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 <button onClick={onAddCar} className="flex items-center gap-3 rounded-xl px-4 py-3.5 text-left text-sm font-bold text-white transition hover:brightness-110" style={{ background: SV.purple }}><Plus size={17} /> Adaugă mașină</button>
@@ -1167,7 +1229,7 @@ function AdminJobDetailsModal({ job, car, rates, employeeName, onClose, onShowCa
       <JobDetailsBody job={job} car={car} rates={rates} employeeName={employeeName} />
       <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--border)] pt-4">
         <button onClick={onClose} className="rounded-lg border border-[var(--border)] px-4 py-2.5 text-sm font-bold transition hover:bg-[var(--surface-secondary)]" style={{ color: 'var(--text-secondary)' }}>Închide</button>
-        <button onClick={() => generateReportPdf(`servix_raport_lucrare_${slugify(car.license_plate)}_${slugify(job.title)}.pdf`, buildSingleJobReportLines(job, car, rates, employeeName))} className="flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold text-white transition hover:brightness-110" style={{ background: 'var(--button)' }}><FileText size={16} /> GENEREAZĂ RAPORT PDF</button>
+        <button onClick={() => void (async () => { const [entries, activity] = await Promise.all([loadCarTimeEntries(car), loadCarsActivityLogs([car])]); generateReportPdf(`servix_raport_lucrare_${slugify(car.license_plate)}_${slugify(job.title)}.pdf`, buildSingleJobReportLines(job, car, rates, employeeName, entries, activity)); })()} className="flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold text-white transition hover:brightness-110" style={{ background: 'var(--button)' }}><FileText size={16} /> GENEREAZĂ RAPORT PDF</button>
         <button onClick={() => { onClose(); onShowCar(car); }} className="rounded-lg px-4 py-2.5 text-sm font-bold text-white transition hover:brightness-110" style={{ background: 'var(--button)' }}>Deschide mașina</button>
       </div>
     </div>
@@ -1252,7 +1314,168 @@ function ChangeJobAllocationModal({ job, car, employees, employeeName, onSaved, 
 // ============================================================
 // REPORTS VIEW
 // ============================================================
-/** Shared report content used by both PDF generators. */
+// ============================================================
+// SECȚIUNE „ISTORIC TIMP DE LUCRU” — sesiuni reale din time_entries
+// ============================================================
+// Surse de date: tabelul `time_entries` (istoric atomic per angajat):
+//   employee_id, job_id, start_time, end_time, duration_seconds, is_overtime.
+// Afișăm fiecare interval REAL start→stop în ordine cronologică, fără a
+// inventa timestamp-uri din durata totală. Transferul între angajați este
+// păstrat: fiecare sesiune are employee_id-ul propriu.
+
+function formatSessionDate(iso: string): string {
+  const d = new Date(iso);
+  return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+}
+function formatSessionClock(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+/** Durata unei sesiuni: end−start (atunci când există), altfel duration_seconds (sursa timerului). */
+function sessionDurationSeconds(e: { start_time: string; end_time: string | null; duration_seconds: number | null }): number {
+  if (e.end_time) {
+    const diff = (new Date(e.end_time).getTime() - new Date(e.start_time).getTime()) / 1000;
+    if (diff >= 0) return diff;
+  }
+  return e.duration_seconds ?? 0;
+}
+
+/** Încarcă toate sesiunile (time_entries) pentru o mașină — prin DataAdapter (Web + Local). */
+async function loadCarTimeEntries(car: Car): Promise<EmployeeTimeEntry[]> {
+  return loadCarsTimeEntries([car]);
+}
+
+/** Sesiuni (time_entries) pentru MAI MAI multe mașini, într-un singur query DataAdapter. */
+async function loadCarsTimeEntries(cars: Car[]): Promise<EmployeeTimeEntry[]> {
+  if (cars.length === 0) return [];
+  const carIds = new Set(cars.map((c: Car) => c.id));
+  const createdTimes = cars.map((c: Car) => (c.created_at ? new Date(c.created_at).getTime() : NaN)).filter((t: number) => !Number.isNaN(t));
+  const fromMs = createdTimes.length > 0 ? Math.min(...createdTimes) - 2000 : Date.now() - 365 * 24 * 3600 * 1000;
+  try {
+    const res = await dataAdapter.getTimeEntries({
+      fromIso: new Date(fromMs).toISOString(),
+      toIso: new Date(Date.now() + 2000).toISOString(),
+    });
+    if (res.error) return [];
+    return (res.data ?? []).filter((e) => e.jobs?.car_id != null && carIds.has(e.jobs.car_id));
+  } catch {
+    return [];
+  }
+}
+
+/** Sesiuni marcate corespunzător: fără end_time = „(în derulare)”, fără oră inventată. */
+function sessionEndTimeLabel(endTime: string | null): string {
+  return endTime ? formatSessionClock(endTime) : '— (în derulare)';
+}
+
+/** Rânduri PDF pentru secțiunea „Istoric timp de lucru” (o singură lucrare dacă jobId e dat). */
+function buildTimeHistoryPdfLines(entries: EmployeeTimeEntry[], empName: (id: string | null) => string, jobId?: string): PdfLine[] {
+  const lines: PdfLine[] = [pdfHeading('Istoric timp de lucru')];
+  const list = entries
+    .filter((e) => (jobId ? e.job_id === jobId : true))
+    .slice()
+    .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+  if (list.length === 0) {
+    lines.push(pdfRow('-', 'Nu exista sesiuni inregistrate (time_entries)'));
+    return lines;
+  }
+  let total = 0;
+  for (const e of list) {
+    const dur = sessionDurationSeconds(e);
+    total += dur;
+    const ot = e.is_overtime ? 'Overtime' : 'Normal';
+    lines.push({ text: `${formatSessionDate(e.start_time)} | ${formatSessionClock(e.start_time)} -> ${sessionEndTimeLabel(e.end_time)} | ${formatShortDuration(dur)} | ${empName(e.employee_id)} | ${ot}${e.end_time ? '' : ' (în derulare)'}`, size: 11, bold: false, gapBefore: 3 });
+  }
+  lines.push({ text: `Timp total lucrat: ${formatShortDuration(total)}`, size: 12, bold: true, gapBefore: 8 });
+  return lines;
+}
+
+// ============================================================
+// CRONOLOGIE LUCRARE — jurnalul real de activitate (activity_log)
+// ============================================================
+// Sursă: același jurnal „ACTIVITATE” din Car History/Detalii mașină
+// (activity_log prin DataAdapter: Web=Supabase, Local=SQLite/server).
+// Evenimentele sunt filtrate pe job_id, astfel fiecare lucrare primește
+// DOAR activitatea proprie — nimic reconstruit din worked_seconds, nimic
+// inventat: se afișează exact data/ora/descrierea din jurnal.
+
+/** Ora (HH:MM) evenimentului, pentru propoziția „Nume + acțiune + oră”. */
+function formatEventClock(iso: string): string {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/**
+ * Fraza standard pentru un `action` din activity_log, în funcție de acțiunea
+ * ANTERIOARĂ a ACELEIAȘI lucrări (distinge pornire vs. reluare din pauză vs.
+ * reluare din așteptare piese). `null` = acțiune fără frază standard (transfer,
+ * takeover etc.) — se folosește `detail`-ul existent, neschimbat.
+ */
+function activityEventPhrase(action: string, prevActionSameJob: string | null): string | null {
+  switch (action) {
+    case 'in_lucru':
+      if (prevActionSameJob === 'asteptare_piese') return 'o reluat lucrarea din așteptare';
+      if (prevActionSameJob === 'asteptare') return 'o reluat lucrarea';
+      return 'a pornit lucrarea';
+    case 'asteptare': return 'a pus lucrarea pe pauză';
+    case 'asteptare_piese': return 'a trecut lucrarea în așteptare';
+    case 'finalizat': return 'a finalizat lucrarea';
+    case 'overtime_start': return 'a pornit lucrul peste program';
+    case 'overtime_stop': return 'a oprit lucrul peste program';
+    default: return null;
+  }
+}
+
+/** Text unic „Nume + acțiune + oră” pentru un eveniment; identic în Admin și PDF. */
+function describeActivityEvent(e: { action: string; detail: string | null; created_at: string; employee_id?: string | null }, prevActionSameJob: string | null, empName: (id: string | null) => string): string {
+  const clock = formatEventClock(e.created_at);
+  const person = e.employee_id ? empName(e.employee_id) : '';
+  const phrase = activityEventPhrase(e.action, prevActionSameJob);
+  if (phrase) return person ? `${person} ${phrase} la ${clock}` : `${phrase.charAt(0).toUpperCase()}${phrase.slice(1)} la ${clock}`;
+  const desc = e.detail ?? e.action;
+  return person && !desc.includes(person) ? `${desc} — ${person} la ${clock}` : `${desc} la ${clock}`;
+}
+
+/** Rânduri PDF pentru secțiunea „Cronologie lucrare” — tabel profesional, header repetat pe pagini noi. */
+function buildJobActivityPdfLines(activity: CarActivityEntry[], empName: (id: string | null) => string, jobId?: string): PdfLine[] {
+  const lines: PdfLine[] = [pdfHeading('Cronologie lucrare')];
+  const list = activity
+    .filter((e) => (jobId ? e.job_id === jobId : true))
+    .slice()
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+  if (list.length === 0) {
+    lines.push({ text: 'Nu exista evenimente inregistrate (activity_log)', size: 10.5, bold: false, color: '#000000', table: 'crono' });
+    return lines;
+  }
+  // Header tabel (repetat automat la spargerea paginii de către generator).
+  lines.push({ text: 'DATA', size: 9.5, bold: true, color: '#000000', gapBefore: 4, cols: [{ text: 'ACTIVITATE', x: ACTIVITY_COL_X }], table: 'crono', tableHead: true });
+  lines.push({ text: '', size: 2, bold: false, rule: true, gapBefore: 3, table: 'crono', tableHead: true });
+  // Lista e deja filtrată pe O SINGURĂ lucrare (jobId) — un singur „fir” cronologic.
+  let prevAction: string | null = null;
+  for (const e of list) {
+    const text = describeActivityEvent(e, prevAction, empName);
+    lines.push({ text: formatSessionDate(e.created_at), size: 10.5, bold: false, gapBefore: 5, cols: [{ text, x: ACTIVITY_COL_X }], table: 'crono' });
+    prevAction = e.action;
+  }
+  lines.push({ text: '', size: 2, bold: false, rule: true, gapBefore: 6, table: 'crono' });
+  return lines;
+}
+
+/** Jurnalul de activitate (activity_log) pentru MAI MAI multe mașini — prin DataAdapter (Web + Local). */
+async function loadCarsActivityLogs(cars: Car[]): Promise<CarActivityEntry[]> {
+  const results = await Promise.all(cars.map(async (c: Car) => {
+    try {
+      const res = await dataAdapter.getCarActivityLog(c.id);
+      return res.error ? [] : (res.data ?? []);
+    } catch {
+      return [];
+    }
+  }));
+  return results.flat();
+}
+
+/** Shared report content used by both PDF generators — stil factură / document de service. */
 function buildCarReportLines(car: Car, rates: Rates | null, plateHistory: PlateHistoryEntry[], mileageLog: MileageLogEntry[], empName: string): PdfLine[] {
   const overtimeSec = totalOvertimeSeconds(car.jobs);
   const totalSec = totalWorkedSeconds(car.jobs);
@@ -1263,37 +1486,37 @@ function buildCarReportLines(car: Car, rates: Rates | null, plateHistory: PlateH
   const normalCost = (normalSec / 3600) * normalRate;
   const overtimeCost = (overtimeSec / 3600) * overtimeRate;
   const lines: PdfLine[] = [
-    pdfTitle('SERVIX - Raport final masina'),
-    pdfRow('Numar inmatriculare', car.license_plate),
-    pdfRow('ID intern', car.internal_id ?? '-'),
-    pdfRow('Client', `${car.client_name}${car.client_phone ? ` - ${car.client_phone}` : ''}`),
-    pdfRow('Marca / Model', `${car.make ?? '-'} ${car.model ?? ''}`.trim()),
-    pdfRow('VIN', car.vin ?? '-'),
-    pdfRow('Kilometraj', formatMileage(car.mileage)),
-    pdfRow('Angajat', empName),
-    pdfRow('Status', statusLabels[getCarStatus(car.jobs ?? [])]),
-    pdfRow('Data finalizarii', car.completed_at ? new Date(car.completed_at).toLocaleDateString('ro-RO') : '-'),
-    pdfHeading('Lucrari efectuate'),
+    ...pdfDocumentHeader('SERVIX — Raport final mașină'),
+    pdfKVRow('Tip raport', 'Final mașină', 'Generat', new Date().toLocaleDateString('ro-RO'))[0],
+    pdfKVRow('Tip raport', 'Final mașină', 'Generat', new Date().toLocaleDateString('ro-RO'))[1],
   ];
+  // VEHICUL | CLIENT în două coloane (reutilizează blocul comun, fără paragrafe).
+  const vehiclePairs: Array<[string, string, string, string]> = [
+    ['Marcă / model', `${car.make ?? '-'} ${car.model ?? ''}`.trim() || '-', 'Nume', car.client_name],
+    ['Număr înmatriculare', car.license_plate, 'Telefon', car.client_phone || '-'],
+    ['VIN', car.vin ?? '-', 'Email', car.client_email || '-'],
+    ['Kilometraj', formatMileage(car.mileage), 'ID intern', car.internal_id ?? '-'],
+  ];
+  lines.push(
+    { text: 'VEHICUL', size: 10, bold: true, color: '#000000', gapBefore: 8, cols: [{ text: 'CLIENT', x: SECOND_COL_X }] },
+    ...vehiclePairs.flatMap(([l1, v1, l2, v2]) => pdfKVRow(l1, v1, l2, v2)),
+    pdfRule(10),
+  );
+  lines.push(pdfHeading('Lucrări efectuate'));
   const jobs = [...(car.jobs ?? [])].sort((a: Job, b: Job) => a.order_index - b.order_index);
   if (jobs.length === 0) {
     lines.push(pdfRow('-', 'Nu exista lucrari inregistrate'));
   } else {
     for (const j of jobs) {
-      lines.push({ text: `- ${j.title} [${statusLabels[j.status]}]`, size: 10.5, bold: false });
-      // FIX: worked_seconds conține DOAR timp normal (nu se scade overtime_seconds)
-      lines.push(pdfRow('  Timp normal / Peste program', `${formatShortDuration(j.worked_seconds)} / ${formatShortDuration(j.overtime_seconds ?? 0)}  (finalizata: ${j.completed_at ? new Date(j.completed_at).toLocaleDateString('ro-RO') : '-'})`));
+      lines.push({ text: j.title, size: 11.5, bold: true, gapBefore: 5, right: statusLabels[j.status] });
+      lines.push(pdfRow('  Timp normal', formatShortDuration(j.worked_seconds)));
+      lines.push(pdfRow('  Peste program', formatShortDuration(j.overtime_seconds ?? 0)));
+      lines.push(pdfRow('  Finalizată', j.completed_at ? new Date(j.completed_at).toLocaleDateString('ro-RO') : '-'));
     }
   }
+  // MANOPERĂ + TOTALURI — aceleași blocuri comune ca în „Raport per lucrare”.
+  lines.push(...pdfManoperaTable(normalSec, overtimeSec, normalCost, overtimeCost));
   lines.push(
-    pdfHeading('Timpi'),
-    pdfRow('Timp normal', formatShortDuration(normalSec)),
-    pdfRow('Timp peste program', formatShortDuration(overtimeSec)),
-    { text: `Timp total:  ${formatShortDuration(totalSec + overtimeSec)}`, size: 12, bold: true },
-    pdfHeading('Cost'),
-    pdfRow(`Cost timp normal (${normalRate} lei/ora)`, `${normalCost.toFixed(2)} lei`),
-    pdfRow(`Cost timp suplimentar (${overtimeRate} lei/ora)`, `${overtimeCost.toFixed(2)} lei`),
-    { text: `Cost total:  ${(normalCost + overtimeCost).toFixed(2)} lei`, size: 14, bold: true },
     pdfHeading('Status financiar'),
     pdfRow('Status financiar', financialLabels[car.financial_status as FinancialStatus] ?? String(car.financial_status ?? '-')),
   );
@@ -1305,12 +1528,101 @@ function buildCarReportLines(car: Car, rates: Rates | null, plateHistory: PlateH
     lines.push(pdfHeading('Istoric kilometraj'));
     for (const m of mileageLog) lines.push(pdfRow(formatMileage(m.mileage), new Date(m.recorded_at).toLocaleDateString('ro-RO')));
   }
-  lines.push(pdfHeading('Generat'), pdfRow('Data generarii', `${new Date().toLocaleString('ro-RO')} - SERVIX Service Auto`));
+  const vatRate = rates?.vat_rate ?? 21;
+  const summary = calculateCostSummary(normalCost + overtimeCost, vatRate);
+  lines.push(...pdfTotalsBlock(summary.subtotal, vatRate, summary.vatAmount, summary.totalWithVat));
+  lines.push(pdfHeading('Generat'), pdfRow('Data generării', `${new Date().toLocaleString('ro-RO')} — SERVIX Service Auto`));
     return lines;
 }
 
+// ============================================================
+// LAYOUT DOCUMENT (stil factură) — coloane, tabele, totaluri
+// ============================================================
+const SECOND_COL_X = 330;   // coloana „LUCRARE” (dreapta)
+const DURATION_COL_X = 312; // coloana „Durată” din tabelul MANOPERĂ
+// Lățime fixă pentru coloana „DATA / ORA”: „08.09.2026 14:01:49” la 10.5pt
+// DejaVu ≈ 110pt, deci 170 lasă un gap clar față de ACTIVITATE. Generatorul
+// pdf.ts mută oricum coloana mai la dreapta dacă data ar fi mai lată (anti-suprapunere).
+const ACTIVITY_COL_X = 170; // coloana „ACTIVITATE” din cronologie
+// Text informativ = negru complet (fără gri „spălăcit”); doar subtotal (roșu) și total cu TVA (verde) rămân colorate.
+const GRAY = '#000000';
+
+/** Valoare monetară în format românesc (virguză zecimală). */
+function lei(n: number): string {
+  return `${n.toFixed(2).replace('.', ',')} lei`;
+}
+/** Linie orizontală de separare. */
+function pdfRule(gapBefore = 6): PdfLine {
+  return { text: '', size: 2, bold: false, rule: true, gapBefore };
+}
+/** Etichetă mică gri pentru coloane / secțiuni. */
+function pdfColHead(t: string, x?: number, gapBefore = 8): PdfLine {
+  return { text: t, size: 9.5, bold: false, color: GRAY, gapBefore, x };
+}
+/** Rând dublu: pereche etichetă+valoare pe două coloane (VEHICUL | LUCRARE). */
+function pdfKVRow(l1: string, v1: string, l2: string, v2: string): PdfLine[] {
+  return [
+    { text: l1, size: 9.5, bold: false, color: GRAY, gapBefore: 7, cols: [{ text: l2, x: SECOND_COL_X }] },
+    { text: v1, size: 12, bold: true, gapBefore: 1, cols: [{ text: v2, x: SECOND_COL_X }] },
+  ];
+}
+/** Header document: titlu + subtitlu discret + linie. Un singur loc pentru identitatea vizuală SERVIX. */
+function pdfDocumentHeader(titleText: string = 'SERVIX — Raport per lucrare'): PdfLine[] {
+  return [
+    pdfTitle(titleText),
+    { text: 'Atelier Management', size: 10, bold: false, color: GRAY, gapBefore: 2 },
+    pdfRule(12),
+  ];
+}
+/** Bloc VEHICUL | LUCRARE în două coloane. */
+function pdfVehicleJobBlock(car: Car, jobTitle: string, angajat: string, dataStr: string): PdfLine[] {
+  const pairs: Array<[string, string, string, string]> = [
+    ['Marcă / model', `${car.make ?? '-'} ${car.model ?? ''}`.trim() || '-', 'Denumire lucrare', jobTitle],
+    ['Număr înmatriculare', car.license_plate, 'Data', dataStr],
+    ['Client', car.client_name, 'Angajat', angajat],
+  ];
+  return [
+    { text: 'VEHICUL', size: 10, bold: true, color: '#000000', gapBefore: 8, cols: [{ text: 'LUCRARE', x: SECOND_COL_X }] },
+    ...pairs.flatMap(([l1, v1, l2, v2]) => pdfKVRow(l1, v1, l2, v2)),
+    pdfRule(10),
+  ];
+}
+/** Tabel MANOPERĂ (stil factură):Descriere | Durată | Valoare, fără paranteze. */
+function pdfManoperaTable(normalSec: number, overtimeSec: number, normalCost: number, overtimeCost: number): PdfLine[] {
+  const totalSec = normalSec + overtimeSec;
+  const totalCost = normalCost + overtimeCost;
+  const lines: PdfLine[] = [
+    pdfHeading('Manoperă'),
+    { text: 'Descriere', size: 9.5, bold: false, color: GRAY, gapBefore: 4, cols: [{ text: 'Durată', x: DURATION_COL_X }], right: 'Valoare' },
+    pdfRule(3),
+    { text: 'Ore normale', size: 11.5, bold: false, gapBefore: 5, cols: [{ text: formatShortDuration(normalSec), x: DURATION_COL_X }], right: lei(normalCost) },
+  ];
+  // Rândul de overtime doar dacă există ore peste program reale — fără rânduri inventate.
+  if (overtimeSec > 0) {
+    lines.push({ text: 'Ore peste program', size: 11.5, bold: false, gapBefore: 4, cols: [{ text: formatShortDuration(overtimeSec), x: DURATION_COL_X }], right: lei(overtimeCost) });
+  }
+  lines.push(
+    pdfRule(4),
+    { text: 'TOTAL ORE LUCRATE', size: 12, bold: true, gapBefore: 5, cols: [{ text: formatShortDuration(totalSec), x: DURATION_COL_X }] },
+    { text: 'TOTAL MANOPERĂ', size: 12.5, bold: true, gapBefore: 4, right: lei(totalCost) },
+    pdfRule(10),
+  );
+  return lines;
+}
+/** Zona de totaluri (stil factură): subtotal roșu, TVA, total verde cel mai vizibil. */
+function pdfTotalsBlock(totalWithoutVat: number, vatRate: number, vatAmount: number, totalWithVat: number): PdfLine[] {
+  return [
+    pdfRule(16),
+    { text: 'SUBTOTAL FĂRĂ TVA', size: 12, bold: true, color: '#EF4444', gapBefore: 2, right: lei(totalWithoutVat) },
+    { text: `TVA (${vatRate}%)`, size: 12, bold: false, gapBefore: 4, right: lei(vatAmount) },
+    pdfRule(5),
+    { text: 'TOTAL CU TVA', size: 16, bold: true, color: '#22C55E', gapBefore: 7, right: lei(totalWithVat) },
+    pdfRule(12),
+  ];
+}
+
 /** PDF pentru O SINGURĂ lucrare selectată (reutilizează computeJobCost + logica TVA). */
-function buildSingleJobReportLines(job: Job, car: Car, rates: Rates | null, employeeName: (id: string | null) => string): PdfLine[] {
+function buildSingleJobReportLines(job: Job, car: Car, rates: Rates | null, employeeName: (id: string | null) => string, jobEntries: EmployeeTimeEntry[] = [], jobActivity: CarActivityEntry[] = []): PdfLine[] {
   const cost = computeJobCost(job, car, rates);
   const vatRate = rates?.vat_rate ?? 21;
   const rawTotalWithoutVat = cost.totalCost;
@@ -1320,22 +1632,11 @@ function buildSingleJobReportLines(job: Job, car: Car, rates: Rates | null, empl
   const totalWithVat = summary.totalWithVat;
   const dataFin = job.completed_at ?? job.started_at;
   return [
-    pdfTitle('SERVIX - Raport per lucrare'),
-    pdfRow('Tip raport', 'Per lucrare (o singură lucrare)'),
-    pdfRow('Lucrare', job.title),
-    pdfRow('Data finalizării', dataFin ? new Date(dataFin).toLocaleDateString('ro-RO') : '-'),
-    pdfHeading(`${car.license_plate} — ${job.title}`),
-    pdfRow('  Număr înmatriculare', car.license_plate),
-    pdfRow('  Marca / Model', `${car.make ?? '-'} ${car.model ?? ''}`.trim()),
-    pdfRow('  Proprietar', car.client_name),
-    pdfRow('  Angajat', employeeName(car.assigned_employee_id)),
-    pdfRow('  Data', dataFin ? new Date(dataFin).toLocaleDateString('ro-RO') : '-'),
-    pdfRow('  Ore lucrate', `${formatShortDuration(cost.totalSec)}  (normal ${formatShortDuration(cost.normalSec)} / peste program ${formatShortDuration(cost.overtimeSec)})`),
-    pdfRow('  Cost manopera', `${cost.totalCost.toFixed(2)} lei  (normal ${cost.normalCost.toFixed(2)} lei x ${cost.normalRate} lei/ora + supl. ${cost.overtimeCost.toFixed(2)} lei x ${cost.overtimeRate} lei/ora)`),
-    pdfHeading('Total'),
-    { text: `TVA (${vatRate}%): ${vatAmount.toFixed(2)} lei`, size: 11, bold: false, gapBefore: 8 },
-    { text: `TOTAL FĂRĂ TVA: ${totalWithoutVat.toFixed(2)} lei`, size: 14, bold: true, gapBefore: 6, color: '#EF4444' },
-    { text: `TOTAL CU TVA: ${totalWithVat.toFixed(2)} lei`, size: 16, bold: true, gapBefore: 6, color: '#22C55E' },
+    ...pdfDocumentHeader(),
+    ...pdfVehicleJobBlock(car, job.title, employeeName(car.assigned_employee_id), dataFin ? new Date(dataFin).toLocaleDateString('ro-RO') : '-'),
+    ...pdfManoperaTable(cost.normalSec, cost.overtimeSec, cost.normalCost, cost.overtimeCost),
+    ...buildJobActivityPdfLines(jobActivity, employeeName, job.id),
+    ...pdfTotalsBlock(totalWithoutVat, vatRate, vatAmount, totalWithVat),
     pdfHeading('Generat'),
     pdfRow('Data generării', `${new Date().toLocaleString('ro-RO')} - SERVIX Service Auto`),
   ];
@@ -1385,26 +1686,21 @@ function occurrencesPeriod(occs: JobOccurrence[]): string {
   return `${Math.min(...ys)} - ${Math.max(...ys)}`;
 }
 
-function formatHrCost(o: JobOccurrence): PdfLine[] {
+/** Bloc comun pentru o apariție de lucrare (agregat): VEHICUL | LUCRARE + MANOPERĂ, stil factură. */
+function pdfOccurrenceBlock(o: JobOccurrence): PdfLine[] {
   const date = o.job.completed_at ?? o.job.started_at;
   return [
-    pdfRow('  Masina', `${o.car.make ?? ''} ${o.car.model ?? ''}`.trim() || '-'),
-    pdfRow('  Nr. inmatriculare', o.car.license_plate),
-    pdfRow('  Client', o.car.client_name),
-    pdfRow('  Angajat', o.emp),
-    pdfRow('  Data', date ? new Date(date).toLocaleDateString('ro-RO') : '-'),
-    pdfRow('  Ore lucrate', `${formatShortDuration(o.totalSec)}  (normal ${formatShortDuration(o.normalSec)} / peste program ${formatShortDuration(o.overtimeSec)})`),
-    pdfRow('  Cost manopera', `${o.totalCost.toFixed(2)} lei  (normal ${o.normalCost.toFixed(2)} lei x ${o.normalRate} lei/ora + supl. ${o.overtimeCost.toFixed(2)} lei x ${o.overtimeRate} lei/ora)`),
+    ...pdfVehicleJobBlock(o.car, o.job.title, o.emp, date ? new Date(date).toLocaleDateString('ro-RO') : '-'),
+    ...pdfManoperaTable(o.normalSec, o.overtimeSec, o.normalCost, o.overtimeCost),
   ];
 }
 /** PDF „Raport per lucrare”: doar datele pentru lucrarea selectata, separat pe an. */
-function buildJobReportLines(cars: Car[], rates: Rates | null, employeeName: (id: string | null) => string, jobTitle: string): PdfLine[] {
+function buildJobReportLines(cars: Car[], rates: Rates | null, employeeName: (id: string | null) => string, jobTitle: string, timeEntries: EmployeeTimeEntry[] = [], activityEntries: CarActivityEntry[] = []): PdfLine[] {
   const occs = collectJobOccurrences(cars, rates, employeeName).filter((o: JobOccurrence) => o.job.title === jobTitle);
   const lines: PdfLine[] = [
-    pdfTitle('SERVIX - Raport per lucrare'),
-    pdfRow('Tip raport', 'Per lucrare'),
-    pdfRow('Lucrare', jobTitle),
-    pdfRow('Perioada', occurrencesPeriod(occs)),
+    ...pdfDocumentHeader(),
+    pdfKVRow('Tip raport', 'Per lucrare', 'Perioada', occurrencesPeriod(occs))[0],
+    pdfKVRow('Tip raport', 'Per lucrare', 'Perioada', occurrencesPeriod(occs))[1],
     pdfHeading(jobTitle.toUpperCase()),
   ];
   if (occs.length === 0) {
@@ -1415,10 +1711,15 @@ function buildJobReportLines(cars: Car[], rates: Rates | null, employeeName: (id
     let totalCost = 0;
     for (const o of occs) {
       if (o.year !== lastYear) {
-        lines.push({ text: String(o.year), size: 13, bold: true, gapBefore: 10 });
+        lines.push({ text: String(o.year), size: 14, bold: true, gapBefore: 10 });
         lastYear = o.year;
       }
-      lines.push(...formatHrCost(o));
+      // Document per apariție: VEHICUL | LUCRARE, MANOPERĂ, CRONOLOGIE.
+      const date = o.job.completed_at ?? o.job.started_at;
+      lines.push(...pdfVehicleJobBlock(o.car, o.job.title, o.emp, date ? new Date(date).toLocaleDateString('ro-RO') : '-'));
+      lines.push(...pdfManoperaTable(o.normalSec, o.overtimeSec, o.normalCost, o.overtimeCost));
+      // Cronologia REALĂ a evenimentelor aceleiași lucrări (activity_log, pe job_id).
+      lines.push(...buildJobActivityPdfLines(activityEntries, employeeName, o.job.id));
       totalSec += o.totalSec;
       totalCost += o.totalCost;
     }
@@ -1426,10 +1727,8 @@ function buildJobReportLines(cars: Car[], rates: Rates | null, employeeName: (id
     const totalWithoutVat = totalCost;
     const vatAmount = (totalWithoutVat * vatRate) / 100;
     const totalWithVat = totalWithoutVat + vatAmount;
-    lines.push({ text: `Total lucrare: ${occs.length} aparitii, ${formatShortDuration(totalSec)} ore, ${totalWithoutVat.toFixed(2)} lei`, size: 13, bold: true, gapBefore: 12 });
-    lines.push({ text: `Total fara TVA: ${totalWithoutVat.toFixed(2)} lei`, size: 11, bold: false, gapBefore: 8 });
-    lines.push({ text: `TVA (${vatRate}%): ${vatAmount.toFixed(2)} lei`, size: 11, bold: false });
-    lines.push({ text: `TOTAL CU TVA: ${totalWithVat.toFixed(2)} lei`, size: 14, bold: true, gapBefore: 6 });
+    lines.push({ text: `Lucrare selectată: ${occs.length} apariții`, size: 10, bold: false, color: GRAY, gapBefore: 4 });
+    lines.push(...pdfTotalsBlock(totalWithoutVat, vatRate, vatAmount, totalWithVat));
   }
   lines.push(pdfHeading('Generat'), pdfRow('Data generarii', `${new Date().toLocaleString('ro-RO')} - SERVIX Service Auto`));
   return lines;
@@ -1439,9 +1738,9 @@ function buildJobReportLines(cars: Car[], rates: Rates | null, employeeName: (id
 function buildTotalReportLines(cars: Car[], rates: Rates | null, employeeName: (id: string | null) => string): PdfLine[] {
   const occs = collectJobOccurrences(cars, rates, employeeName);
   const lines: PdfLine[] = [
-    pdfTitle('SERVIX - Raport total'),
-    pdfRow('Tip raport', 'Total'),
-    pdfRow('Perioada', occurrencesPeriod(occs)),
+    ...pdfDocumentHeader('SERVIX — Raport total'),
+    pdfKVRow('Tip raport', 'Total', 'Perioada', occurrencesPeriod(occs))[0],
+    pdfKVRow('Tip raport', 'Total', 'Perioada', occurrencesPeriod(occs))[1],
   ];
   const grouped = new Map<string, JobOccurrence[]>();
   for (const o of occs) {
@@ -1463,25 +1762,23 @@ function buildTotalReportLines(cars: Car[], rates: Rates | null, employeeName: (
         lines.push({ text: String(o.year), size: 12, bold: true, gapBefore: 6 });
         lastYear = o.year;
       }
-      lines.push(...formatHrCost(o));
+      lines.push(...pdfOccurrenceBlock(o));
       grandTotalSec += o.totalSec;
       grandTotalCost += o.totalCost;
     }
   }
   if (occs.length > 0) {
-    lines.push(pdfHeading('Total general (suplementar)'));
-    lines.push(pdfRow('Ore totale', formatShortDuration(grandTotalSec)));
     const vatRate = rates?.vat_rate ?? 21;
     const rawSubtotalWithoutVat = grandTotalCost;
     const summary = calculateCostSummary(rawSubtotalWithoutVat, vatRate);
     const subtotalWithoutVat = summary.subtotal;
     const vatAmount = summary.vatAmount;
     const grandTotalWithVat = summary.totalWithVat;
-    lines.push({ text: `TVA (${vatRate}%): ${vatAmount.toFixed(2)} lei`, size: 11, bold: false, gapBefore: 8 });
-    lines.push({ text: `TOTAL FĂRĂ TVA: ${subtotalWithoutVat.toFixed(2)} lei`, size: 14, bold: true, gapBefore: 6, color: '#EF4444' });
-    lines.push({ text: `TOTAL CU TVA: ${grandTotalWithVat.toFixed(2)} lei`, size: 16, bold: true, gapBefore: 6, color: '#22C55E' });
+    lines.push(pdfHeading('Totaluri generale'));
+    lines.push({ text: 'TOTAL ORE LUCRATE', size: 12, bold: true, gapBefore: 4, cols: [{ text: formatShortDuration(grandTotalSec), x: DURATION_COL_X }] });
+    lines.push(...pdfTotalsBlock(subtotalWithoutVat, vatRate, vatAmount, grandTotalWithVat));
   }
-  lines.push(pdfHeading('Generat'), pdfRow('Data generarii', `${new Date().toLocaleString('ro-RO')} - SERVIX Service Auto`));
+  lines.push(pdfHeading('Generat'), pdfRow('Data generării', `${new Date().toLocaleString('ro-RO')} — SERVIX Service Auto`));
   return lines;
 }
 
@@ -1528,11 +1825,17 @@ function ReportsView({ cars, employees, rates, schedule, employeeName, onRefresh
   const generateSelectedPDF = (): void => {
     if (reportType === 'total') {
       generateReportPdf('servix_raport_total.pdf', buildTotalReportLines(reportCars, rates, employeeName));
+      setShowGenerate(false);
     } else {
       if (!selectedJob) return;
-      generateReportPdf(`servix_raport_lucrare_${slugify(selectedJob)}.pdf`, buildJobReportLines(reportCars, rates, employeeName, selectedJob));
+      // Raport per lucrare: încarcă întâi sesiunile reale (time_entries) și
+      // jurnalul real (activity_log) pentru mașinile în scop, apoi generează PDF-ul.
+      void (async () => {
+        const [entries, activity] = await Promise.all([loadCarsTimeEntries(reportCars), loadCarsActivityLogs(reportCars)]);
+        generateReportPdf(`servix_raport_lucrare_${slugify(selectedJob)}.pdf`, buildJobReportLines(reportCars, rates, employeeName, selectedJob, entries, activity));
+        setShowGenerate(false);
+      })();
     }
-    setShowGenerate(false);
   };
 
   const kpiCards: Array<{ label: string; count: number; bg: string; dot: string; Icon: React.ElementType }> = [
@@ -2272,7 +2575,9 @@ function SettingsView({ schedule, rates, employees, cars, onRefresh, onGoToEmplo
 // CAR HISTORY MODAL
 // ============================================================
 function CarHistoryModal({ car, employees, rates, onClose, onRefresh, onEdit }: { car: Car; employees: Employee[]; rates: Rates | null; onClose: () => void; onRefresh: () => Promise<void>; onEdit?: () => void }) {
-  const [activity, setActivity] = useState<Array<{ id: string; action: string; detail: string | null; created_at: string }>>([]);
+  const [activity, setActivity] = useState<CarActivityEntry[]>([]);
+  const [timeEntries, setTimeEntries] = useState<EmployeeTimeEntry[]>([]);
+  const [timeLoading, setTimeLoading] = useState(false);
   const [yearFilter, setYearFilter] = useState<number | 'all'>('all');
   const [showChangePlate, setShowChangePlate] = useState(false);
   const [newPlate, setNewPlate] = useState('');
@@ -2318,10 +2623,20 @@ function CarHistoryModal({ car, employees, rates, onClose, onRefresh, onEdit }: 
   useEffect(() => {
     const load = async (): Promise<void> => {
       const actRes = await dataAdapter.getCarActivityLog(car.id);
-      setActivity((actRes.data ?? []) as Array<{ id: string; action: string; detail: string | null; created_at: string }>);
+      setActivity((actRes.data ?? []) as CarActivityEntry[]);
     };
     void load();
   }, [car.id]);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setTimeLoading(true);
+      const entries = await loadCarTimeEntries(car);
+      if (!cancelled) setTimeEntries(entries);
+      setTimeLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [car.id, car.created_at]);
   const handleChangePlate = async (): Promise<void> => {
     if (!newPlate.trim()) return;
     setPlateMsg('');
@@ -2355,11 +2670,15 @@ function CarHistoryModal({ car, employees, rates, onClose, onRefresh, onEdit }: 
   }, [sortedJobs]);
   const availableYears = jobsByYear.map(([year]) => year);
   const filteredYears = yearFilter === 'all' ? jobsByYear : jobsByYear.filter(([year]) => year === yearFilter);
+  const empNameOf = (id: string | null): string => employees.find((e: Employee) => e.id === id)?.name ?? 'Nealocat';
+  const sortedTimeEntries = [...timeEntries].sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+  const totalTimeSec = sortedTimeEntries.reduce((s, e) => s + sessionDurationSeconds(e), 0);
   return <Modal title={`Istoric ${car.license_plate}`} onClose={onClose} wide><div className="space-y-6 p-6"><div className="flex flex-wrap items-center gap-3"><Badge value={getCarStatus(car.jobs ?? [])} /><span className="text-sm text-[var(--text-secondary)]">{car.client_name}</span>{car.internal_id && <span className="rounded bg-[var(--border)] px-2 py-1 text-[10px] font-bold tracking-wide text-[var(--text-secondary)]">{car.internal_id}</span>}{car.is_demo && <span className="rounded bg-[color-mix(in_srgb,var(--warning)_18%,transparent)] px-2 py-1 text-[10px] font-bold tracking-[0.14em] text-[var(--warning)]">DEMO</span>}{onEdit && <button onClick={onEdit} className="ml-auto flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold text-white transition hover:brightness-110" style={{ background: 'var(--button)' }}><Settings size={14} /> Modifică mașina</button>}</div><div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4"><div className="grid gap-3 sm:grid-cols-3"><div><p className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-secondary)]">Marcă / Model</p><p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">{car.make ?? '—'} {car.model ?? ''}</p></div><div><p className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-secondary)]">VIN</p><p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">{car.vin ?? '—'}</p></div><div><p className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-secondary)]">Kilometraj</p><p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">{formatMileage(car.mileage)}</p></div><div><p className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-secondary)]">Telefon</p><p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">{car.client_phone ?? '—'}</p></div><div><p className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-secondary)]">Nivel carburant</p><p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">{car.fuel_level ? fuelLabels[car.fuel_level] : '—'}</p></div><div><p className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-secondary)]">Termen</p><p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">{car.deadline ? new Date(car.deadline).toLocaleDateString('ro-RO') : '—'}</p></div></div>{car.body_observations && <div className="mt-3 border-t border-[var(--border)] pt-3"><p className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-secondary)]">Observații caroserie</p><p className="mt-1 text-sm text-[var(--text-secondary)]">{car.body_observations}</p></div>}{car.photo_url && <div className="mt-3"><img src={car.photo_url} alt={car.license_plate} className="max-h-40 rounded-lg" /></div>}{car.notes && <div className="mt-3 border-t border-[var(--border)] pt-3"><p className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-secondary)]">Note</p><p className="mt-1 text-sm text-[var(--text-secondary)]">{car.notes}</p></div>}</div>
 {plateHistory.length > 0 && <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4"><h3 className="mb-3 text-sm font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Istoric numere</h3><div className="space-y-2">{plateHistory.map((p: PlateHistoryEntry) => <div key={p.id} className="flex items-center justify-between text-sm"><span className="font-semibold text-[var(--text-primary)]">{p.license_plate}</span><span className="text-xs text-[var(--text-secondary)]">{new Date(p.changed_at).toLocaleDateString('ro-RO')}</span></div>)}</div></div>}
 {!showChangePlate ? <button onClick={() => setShowChangePlate(true)} className="flex items-center gap-2 rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-bold text-[var(--text-secondary)] hover:bg-[var(--card)]"><Hash size={16} /> Schimbă numărul</button> : <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4"><h3 className="mb-3 text-sm font-bold text-[var(--text-primary)]">Schimbă numărul de înmatriculare</h3><div className="flex gap-2"><input value={newPlate} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewPlate(e.target.value)} placeholder="Noul număr..." className="h-11 flex-1 rounded-lg border border-[var(--border)] px-3 text-sm outline-none focus:border-[var(--primary)]" /><button onClick={() => void handleChangePlate()} disabled={!newPlate.trim()} className="rounded-lg px-4 py-2.5 text-sm font-bold text-white disabled:bg-[var(--border)]" style={{ background: 'var(--button)' }}>Salvează</button><button onClick={() => { setShowChangePlate(false); setNewPlate(''); setPlateMsg(''); }} className="rounded-lg border border-[var(--border)] px-4 py-2.5 text-sm font-bold text-[var(--text-secondary)]">Anulează</button></div>{plateMsg && <p className="mt-2 text-sm font-semibold text-[var(--text-secondary)]">{plateMsg}</p>}</div>}
 {mileageLog.length > 0 && <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4"><h3 className="mb-3 text-sm font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Istoric kilometraj</h3><div className="space-y-2">{mileageLog.map((m: MileageLogEntry) => <div key={m.id} className="flex items-center justify-between text-sm"><span className="font-semibold text-[var(--text-primary)]">{formatMileage(m.mileage)}</span><span className="text-xs text-[var(--text-secondary)]">{new Date(m.recorded_at).toLocaleDateString('ro-RO')}</span></div>)}</div></div>}
 <div><h3 className="mb-3 text-sm font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Istoric mașină</h3><div className="mb-4 flex flex-wrap gap-2"><button onClick={() => setYearFilter('all')} className={`rounded-lg px-4 py-2 text-sm font-bold transition ${yearFilter === 'all' ? 'text-white' : 'border border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] hover:border-[var(--primary)]'}`} style={yearFilter === 'all' ? { background: 'var(--button)' } : {}}>Toți anii</button>{availableYears.map((year) => <button key={year} onClick={() => setYearFilter(year)} className={`rounded-lg px-4 py-2 text-sm font-bold transition ${yearFilter === year ? 'text-white' : 'border border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] hover:border-[var(--primary)]'}`} style={yearFilter === year ? { background: 'var(--button)' } : {}}>{year}</button>)}</div><div className="space-y-4">{filteredYears.length === 0 ? <p className="text-sm text-[var(--text-secondary)]">Nu există lucrări pentru anul selectat.</p> : filteredYears.map(([year, jobs]) => <div key={year}><p className="mb-2 text-lg font-bold text-[var(--text-primary)]">{year}</p><div className="divide-y divide-[var(--border)] rounded-xl border border-[var(--border)]">{jobs.map((job: Job) => <div key={job.id} className="flex items-center justify-between gap-4 p-4"><div><p className="font-bold text-[var(--text-primary)]">{job.title}</p><p className="mt-1 text-xs text-[var(--text-secondary)]">{job.completed_at ? new Date(job.completed_at).toLocaleString('ro-RO') : 'În lucru'}</p>{job.description && <p className="mt-1 text-xs text-[var(--text-secondary)]">{job.description}</p>}</div><div className="text-right"><Badge value={job.status} compact /><p className="mt-1 font-mono text-xs text-[var(--text-secondary)]">{formatShortDuration(job.worked_seconds)}</p>{(job.overtime_seconds ?? 0) > 0 && <p className="text-xs font-semibold text-[var(--secondary)]">+{formatShortDuration(job.overtime_seconds ?? 0)} peste program</p>}</div></div>)}</div></div>)}</div></div>
+<div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4"><h3 className="mb-3 text-sm font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Istoric timp de lucru</h3>{timeLoading ? <p className="text-sm text-[var(--text-secondary)]">Se încarcă sesiunile...</p> : sortedTimeEntries.length === 0 ? <p className="text-sm text-[var(--text-secondary)]">Nu există sesiuni înregistrate (time_entries).</p> : <div className="divide-y divide-[var(--border)]">{sortedTimeEntries.map((e, i) => { const dur = sessionDurationSeconds(e); return <div key={`${e.job_id}-${e.start_time}-${i}`} className="flex flex-wrap items-center justify-between gap-2 py-2"><div className="flex flex-wrap items-center gap-2 text-sm"><span className="font-mono text-xs font-semibold text-[var(--text-secondary)]">{formatSessionDate(e.start_time)}</span><span className="font-semibold text-[var(--text-primary)]">{formatSessionClock(e.start_time)} → {formatSessionClock(e.end_time)}</span><span className="rounded px-1.5 py-0.5 text-[10px] font-bold" style={{ background: e.is_overtime ? 'color-mix(in srgb, var(--warning) 18%, transparent)' : 'color-mix(in srgb, var(--success) 15%, transparent)', color: e.is_overtime ? 'var(--warning)' : 'var(--success)' }}>{e.is_overtime ? 'Overtime' : 'Normal'}</span></div><div className="flex items-center gap-3 text-right"><span className="text-xs font-semibold text-[var(--text-secondary)]">{empNameOf(e.employee_id)}</span><span className="font-mono text-sm font-bold text-[var(--text-primary)]">{formatShortDuration(dur)}</span></div></div>; })}</div>}{sortedTimeEntries.length > 0 && <div className="mt-3 flex items-center justify-between border-t border-[var(--border)] pt-3"><span className="text-sm font-bold uppercase tracking-wide text-[var(--text-secondary)]">Timp total lucrat</span><span className="text-lg font-bold" style={{ color: 'var(--primary)' }}>{formatShortDuration(totalTimeSec)}</span></div>}</div>
 <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4"><div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Fotografii mașină</h3><button onClick={() => photoInputRef.current?.click()} disabled={uploadingPhotos} className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold text-white transition hover:brightness-110 disabled:opacity-50" style={{ background: 'var(--button)' }}><Image size={14} /> {uploadingPhotos ? 'Se încarcă...' : '+ Adaugă fotografie'}</button></div>
 <input ref={photoInputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={(e: React.ChangeEvent<HTMLInputElement>) => void handlePhotosUpload(e)} />
 {photoMsg && <p className="mb-2 text-xs font-semibold text-[var(--warning)]">{photoMsg}</p>}
@@ -2375,14 +2694,29 @@ function CarHistoryModal({ car, employees, rates, onClose, onRefresh, onEdit }: 
 {jobCosts.length > 0 && <div className="mt-3 flex items-center justify-between border-t border-[var(--border)] pt-3"><span className="text-sm font-bold uppercase tracking-wide text-[var(--text-secondary)]">Total mașină</span><span className="text-xl font-bold" style={{ color: 'var(--primary)' }}>{totalCost.toFixed(0)} LEI</span></div>}
 <p className="mt-2 text-[11px] text-[var(--text-secondary)]">Tarife: normal {normalRateC} lei/oră{car.is_warranty ? ' (garanție)' : ''}, peste program {overtimeRateC} lei/oră — modificate din Admin → Setări.</p></div>
 <div className="flex items-center justify-between border-t border-[var(--border)] pt-4"><div><p className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-secondary)]">Status financiar</p><select defaultValue={car.financial_status} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => void supabase.from('cars').update({ financial_status: e.target.value }).eq('id', car.id).then(() => onRefresh())} className={`mt-1 h-9 rounded-lg border px-2 text-sm font-bold ${financialStyles[car.financial_status as FinancialStatus] ?? 'border-[var(--border)] text-[var(--text-secondary)]'}`}>{financialOptions.map((f: FinancialStatus) => <option key={f} value={f}>{financialLabels[f]}</option>)}</select></div><button onClick={generatePDF} className="flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold text-white" style={{ background: 'var(--button)' }}><FileText size={16} /> GENEREAZĂ PDF</button></div>
-<div><h3 className="mb-3 text-sm font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Activitate</h3><div className="space-y-3">{activity.length === 0 ? <p className="text-sm text-[var(--text-secondary)]">Nu există activitate înregistrată.</p> : activity.map((item) => <div key={item.id} className="flex gap-3"><span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[var(--button)]" /><div><p className="text-sm font-semibold text-[var(--text-primary)]">{item.detail ?? item.action}</p><p className="mt-1 text-xs text-[var(--text-secondary)]">{new Date(item.created_at).toLocaleString('ro-RO')}</p></div></div>)}</div></div></div></Modal>;
+<div><h3 className="mb-3 text-sm font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Activitate</h3><div className="space-y-3">{activity.length === 0 ? <p className="text-sm text-[var(--text-secondary)]">Nu există activitate înregistrată.</p> : (() => { const prevActionByJob = new Map<string, string>(); return activity.map((item) => { const prevAction = item.job_id ? prevActionByJob.get(item.job_id) ?? null : null; const text = describeActivityEvent(item, prevAction, empNameOf); if (item.job_id) prevActionByJob.set(item.job_id, item.action); return <div key={item.id} className="flex gap-3"><span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[var(--button)]" /><div><p className="text-sm font-semibold text-[var(--text-primary)]">{text}</p><p className="mt-1 text-xs text-[var(--text-secondary)]">{formatSessionDate(item.created_at)}</p></div></div>; }); })()}</div></div></div></Modal>;
 }
 
 // ============================================================
 // ADD CAR MODAL
 // ============================================================
-function AddCarModal({ employees, vehicleMakes = [], vehicleModels = [], workCatalog = [], onClose, onSaved }: { employees: Employee[]; vehicleMakes?: CatalogOption[]; vehicleModels?: CatalogOption[]; workCatalog?: CatalogOption[]; onClose: () => void; onSaved: () => Promise<void> }) {
-  const [form, setForm] = useState({ license_plate: '', client_name: '', client_phone: '', make: '', model: '', deadline: '', priority: 'normala', assigned_employee_id: '', notes: '', is_warranty: false, vin: '', mileage: '', body_observations: '', fuel_level: '', photo_url: '', jobs: ['Revizie generală'] });
+function AddCarModal({ cars = [], employees, vehicleMakes = [], vehicleModels = [], workCatalog = [], onClose, onSaved }: { cars?: Car[]; employees: Employee[]; vehicleMakes?: CatalogOption[]; vehicleModels?: CatalogOption[]; workCatalog?: CatalogOption[]; onClose: () => void; onSaved: () => Promise<void> }) {
+  const [form, setForm] = useState({ license_plate: '', client_name: '', client_phone: '', make: '', model: '', year: '', deadline: '', priority: 'normala', assigned_employee_id: '', notes: '', is_warranty: false, vin: '', mileage: '', body_observations: '', fuel_level: '', photo_url: '', jobs: ['Revizie generală'] });
+  // REUTILIZARE MAȘINĂ EXISTENTĂ — căutare pe număr parțial (normalizeSearch/searchIncludes din src/lib/search.ts).
+  const [existingCar, setExistingCar] = useState<Car | null>(null);
+  const plateMatches = existingCar || !form.license_plate.trim() ? [] : cars.filter((c: Car) => searchIncludes(c.license_plate, form.license_plate)).slice(0, 6);
+  const onPlateChange = (v: string): void => {
+    update('license_plate', v);
+    if (existingCar && normalizeSearch(v) !== normalizeSearch(existingCar.license_plate)) setExistingCar(null);
+  };
+  const selectExistingCar = (car: Car): void => {
+    setError('');
+    setExistingCar(car);
+    setForm({ ...form, license_plate: car.license_plate, client_name: car.client_name, client_phone: car.client_phone ?? '', make: car.make ?? '', model: car.model ?? '', vin: car.vin ?? '', year: car.year != null ? String(car.year) : '', mileage: '', jobs: [''] });
+  };
+  const clearExistingCar = (): void => setExistingCar(null);
+  const updateJobAt = (i: number, value: string): void => { const jobs = [...form.jobs]; jobs[i] = value; setForm({ ...form, jobs }); };
+  const removeJobAt = (i: number): void => setForm({ ...form, jobs: form.jobs.filter((_, idx) => idx !== i) });
   const selectedMake = vehicleMakes.find((make) => normalizeSearch(make.name) === normalizeSearch(form.make));
   const modelOptions = vehicleModels.filter((model) => !form.make || model.make_id === selectedMake?.id);
   catalogFieldOptions = {
@@ -2415,8 +2749,51 @@ function AddCarModal({ employees, vehicleMakes = [], vehicleModels = [], workCat
   };
   const save = async (): Promise<void> => {
     if (!form.license_plate || !form.client_name) return;
-    if (!form.mileage) { setError('Kilometrajul este obligatoriu.'); return; }
+    const nonEmptyJobs = form.jobs.map((job) => job.trim()).filter(Boolean);
+    // REGULĂ OBLIGATORIE: nicio mașină/lucrare nouă nu se salvează cu 0 joburi — verificată AICI, nu doar prin disabled pe buton.
+    if (nonEmptyJobs.length === 0) { setError('Adaugă cel puțin o lucrare înainte de salvarea mașinii.'); return; }
+    if (!form.mileage.trim()) { setError('Kilometrajul este obligatoriu.'); return; }
+    const mileageNum = Number(form.mileage);
+    if (!Number.isFinite(mileageNum) || mileageNum < 0) { setError('Kilometrajul introdus nu este valid.'); return; }
+    if (existingCar && mileageNum === (existingCar.mileage ?? null)) { setError('Kilometrajul trebuie actualizat înainte de salvarea unei noi lucrări.'); return; }
     setSaving(true); setError('');
+    if (registry.kind === 'local') {
+      // Local/SQLite: aceeași regulă (reutilizare fără duplicat, kilometraj nou obligatoriu, minim o lucrare), prin DataAdapter.
+      for (const title of nonEmptyJobs) await dataAdapter.upsertWorkCatalog?.(title);
+      if (existingCar) {
+        const updRes = await dataAdapter.updateCar?.(existingCar.id, { mileage: mileageNum });
+        if (updRes?.error) { setError(updRes.error.message); setSaving(false); return; }
+        await dataAdapter.addMileageLog?.({ car_id: existingCar.id, mileage: mileageNum });
+        const startIndex = (existingCar.jobs ?? []).reduce((max: number, j: Job) => Math.max(max, j.order_index), 0);
+        for (let i = 0; i < nonEmptyJobs.length; i += 1) {
+          const jobRes = await dataAdapter.createJob?.({ car_id: existingCar.id, title: nonEmptyJobs[i], order_index: startIndex + i + 1 });
+          if (jobRes?.error) { setError(jobRes.error.message); setSaving(false); return; }
+        }
+        await onSaved();
+        setSaving(false);
+        return;
+      }
+      const carRes = await dataAdapter.createCar?.({ license_plate: form.license_plate.toUpperCase(), client_name: form.client_name, client_phone: form.client_phone || null, make: form.make || null, model: form.model || null, year: form.year ? Math.round(Number(form.year)) : null, deadline: form.deadline || null, priority: form.priority, assigned_employee_id: form.assigned_employee_id || null, notes: form.notes || null, is_warranty: form.is_warranty, vin: form.vin || null, mileage: mileageNum, fuel_level: form.fuel_level || null });
+      if (!carRes || carRes.error || !carRes.data) { setError(carRes?.error?.message ?? 'Nu am putut crea mașina.'); setSaving(false); return; }
+      const localCar = carRes.data;
+      await dataAdapter.addMileageLog?.({ car_id: localCar.id, mileage: mileageNum });
+      for (let i = 0; i < nonEmptyJobs.length; i += 1) await dataAdapter.createJob?.({ car_id: localCar.id, title: nonEmptyJobs[i], order_index: i + 1 });
+      await onSaved();
+      setSaving(false);
+      return;
+    }
+    for (const title of nonEmptyJobs) await supabase.from('work_catalog').upsert({ name: title, normalized_name: normalizeSearch(title) }, { onConflict: 'normalized_name' });
+    if (existingCar) {
+      // REUTILIZARE: NU se creează o mașină duplicat — se actualizează kilometrajul mașinii existente și se adaugă DOAR jobul nou.
+      const { error: updErr } = await supabase.from('cars').update({ mileage: mileageNum }).eq('id', existingCar.id);
+      if (updErr) { setError(updErr.message); setSaving(false); return; }
+      await supabase.from('mileage_log').insert({ car_id: existingCar.id, mileage: mileageNum, is_demo: false });
+      const startIndex = (existingCar.jobs ?? []).reduce((max: number, j: Job) => Math.max(max, j.order_index), 0);
+      await supabase.from('jobs').insert(nonEmptyJobs.map((title: string, index: number) => ({ car_id: existingCar.id, title, order_index: startIndex + index + 1 })));
+      await onSaved();
+      setSaving(false);
+      return;
+    }
     const makeName = form.make.trim();
     let makeId: string | null = null;
     if (makeName) {
@@ -2424,17 +2801,16 @@ function AddCarModal({ employees, vehicleMakes = [], vehicleModels = [], workCat
       makeId = makeRes.data?.id ?? null;
     }
     if (makeId && form.model.trim()) await supabase.from('vehicle_models').upsert({ make_id: makeId, name: form.model.trim(), normalized_name: normalizeSearch(form.model) }, { onConflict: 'make_id,normalized_name' });
-    for (const title of form.jobs.map((job) => job.trim()).filter(Boolean)) await supabase.from('work_catalog').upsert({ name: title, normalized_name: normalizeSearch(title) }, { onConflict: 'normalized_name' });
-    const { data: car, error: err } = await supabase.from('cars').insert({ license_plate: form.license_plate.toUpperCase(), client_name: form.client_name, client_phone: form.client_phone || null, make: form.make || null, model: form.model || null, deadline: form.deadline || null, priority: form.priority, assigned_employee_id: form.assigned_employee_id || null, notes: form.notes || null, is_warranty: form.is_warranty, vin: form.vin || null, mileage: Number(form.mileage) || null, body_observations: form.body_observations || null, fuel_level: form.fuel_level || null, photo_url: form.photo_url || null }).select().maybeSingle();
+    const { data: car, error: err } = await supabase.from('cars').insert({ license_plate: form.license_plate.toUpperCase(), client_name: form.client_name, client_phone: form.client_phone || null, make: form.make || null, model: form.model || null, year: form.year ? Math.round(Number(form.year)) : null, deadline: form.deadline || null, priority: form.priority, assigned_employee_id: form.assigned_employee_id || null, notes: form.notes || null, is_warranty: form.is_warranty, vin: form.vin || null, mileage: mileageNum, body_observations: form.body_observations || null, fuel_level: form.fuel_level || null, photo_url: form.photo_url || null }).select().maybeSingle();
     if (err) { setError(err.message); setSaving(false); return; }
     if (!err && car) {
-      await supabase.from('mileage_log').insert({ car_id: car.id, mileage: Number(form.mileage), is_demo: false });
-      await supabase.from('jobs').insert(form.jobs.filter((j: string) => j.trim()).map((title: string, index: number) => ({ car_id: car.id, title, order_index: index + 1 })));
+      await supabase.from('mileage_log').insert({ car_id: car.id, mileage: mileageNum, is_demo: false });
+      await supabase.from('jobs').insert(nonEmptyJobs.map((title: string, index: number) => ({ car_id: car.id, title, order_index: index + 1 })));
       await onSaved();
     }
     setSaving(false);
   };
-  return <Modal title="Adaugă mașină" onClose={onClose}><div className="space-y-5 p-6"><div className="grid gap-4 sm:grid-cols-2"><Field label="Număr înmatriculare" value={form.license_plate} onChange={(v: string) => update('license_plate', v)} placeholder="TM 27 FXC" /><Field label="Nume client" value={form.client_name} onChange={(v: string) => update('client_name', v)} placeholder="Ion Popescu" /><Field label="Telefon" value={form.client_phone} onChange={(v: string) => update('client_phone', v)} placeholder="0740 000 000" /><Field label="Termen" value={form.deadline} onChange={(v: string) => update('deadline', v)} type="date" /><Field label="Marcă" value={form.make} onChange={(v: string) => update('make', v)} placeholder="Mercedes" list="servix-makes" /><Field label="Model" value={form.model} onChange={(v: string) => update('model', v)} placeholder="Clasa C" list="servix-models" /><Field label="Serie șasiu / VIN (opțional)" value={form.vin} onChange={(v: string) => update('vin', v)} placeholder="WVWZZZ..." /><Field label="Kilometraj (obligatoriu)" value={form.mileage} onChange={(v: string) => update('mileage', v)} type="number" placeholder="150000" /><label className="text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Nivel carburant (opțional)<select value={form.fuel_level} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => update('fuel_level', e.target.value)} className="mt-2 h-11 w-full rounded-lg border border-[var(--border)] px-3 text-sm font-semibold text-[var(--text-primary)]"><option value="">—</option>{fuelOptions.map((f: FuelLevel) => <option key={f} value={f}>{fuelLabels[f]}</option>)}</select></label><label className="text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Prioritate<select value={form.priority} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => update('priority', e.target.value)} className="mt-2 h-11 w-full rounded-lg border border-[var(--border)] px-3 text-sm font-semibold text-[var(--text-primary)]"><option value="normala">Normală</option><option value="urgenta">Urgentă</option></select></label><label className="text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Responsabil<select value={form.assigned_employee_id} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => update('assigned_employee_id', e.target.value)} className="mt-2 h-11 w-full rounded-lg border border-[var(--border)] px-3 text-sm font-semibold text-[var(--text-primary)]"><option value="">Nealocat</option>{employees.filter((e: Employee) => e.role === 'employee').map((e: Employee) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></label><Field label="URL poză mașină (opțional)" value={form.photo_url} onChange={(v: string) => update('photo_url', v)} placeholder="https://..." /><div><label className="text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Fotografie mașină</label><div className="mt-2 flex items-center gap-3">{form.photo_url ? <img src={form.photo_url} alt="Mașină" className="h-16 w-24 flex-none rounded-lg object-cover" /> : <div className="flex h-16 w-24 flex-none items-center justify-center rounded-lg" style={{ background: 'color-mix(in srgb, var(--primary) 12%, transparent)' }}><CarFront size={26} style={{ color: 'var(--secondary)' }} /></div>}<button onClick={() => carPhotoInputRef.current?.click()} disabled={photoUploading} className="flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-bold text-[var(--secondary)] transition hover:bg-[var(--card)] disabled:opacity-50"><Image size={14} /> {photoUploading ? 'Se încarcă...' : '+ Adaugă fotografie'}</button>{form.photo_url && <button onClick={() => update('photo_url', '')} className="text-xs font-bold text-[var(--danger)]">Elimină</button>}</div>{photoErr && <p className="mt-1 text-xs font-semibold text-red-500">{photoErr}</p>}<input ref={carPhotoInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e: React.ChangeEvent<HTMLInputElement>) => void handleCarPhoto(e)} /></div></div><label className="block text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Observații caroserie (opțional)<textarea value={form.body_observations} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => update('body_observations', e.target.value)} rows={2} className="mt-2 w-full rounded-lg border border-[var(--border)] px-3 py-2 text-sm outline-none focus:border-[var(--primary)]" placeholder="Zgârietură portieră stânga, etc." /></label><label className="flex items-center gap-2 text-sm font-semibold text-[var(--text-secondary)]"><input type="checkbox" checked={form.is_warranty} onChange={(e: React.ChangeEvent<HTMLInputElement>) => update('is_warranty', e.target.checked)} /> În garanție (tarif 0 lei/oră)</label><label className="block text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Note<textarea value={form.notes} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => update('notes', e.target.value)} rows={3} className="mt-2 w-full rounded-lg border border-[var(--border)] px-3 py-2 text-sm outline-none focus:border-[var(--primary)]" placeholder="Informații relevante..." /></label><div><div className="mb-2 flex items-center justify-between"><label className="text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Lucrări necesare</label><button onClick={() => setForm({ ...form, jobs: [...form.jobs, ''] })} className="text-xs font-bold text-[var(--primary)]">+ Adaugă lucrare</button></div><div className="space-y-2">{form.jobs.map((j: string, i: number) => <input key={i} value={j} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { const jobs = [...form.jobs]; jobs[i] = e.target.value; setForm({ ...form, jobs }); }} className="h-11 w-full rounded-lg border border-[var(--border)] px-3 text-sm outline-none focus:border-[var(--primary)]" placeholder={`Lucrarea ${i + 1}`} />)}</div></div>{error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{error}</div>}<datalist id="servix-makes">{VEHICLE_MAKES.map((m: string) => <option key={m} value={m} />)}</datalist><datalist id="servix-models">{modelsFor(form.make).map((m: string) => <option key={m} value={m} />)}</datalist><div className="flex justify-end gap-3 border-t border-[var(--border)] pt-5"><button onClick={onClose} className="rounded-lg px-4 py-2.5 text-sm font-bold text-[var(--text-secondary)] hover:bg-[var(--border)]">Anulează</button><button onClick={save} disabled={saving || !form.license_plate || !form.client_name || !form.mileage} className="rounded-lg px-5 py-2.5 text-sm font-bold text-white transition disabled:bg-[var(--border)] disabled:text-[var(--text-secondary)]" style={{ background: 'var(--button)' }}>{saving ? 'Se salvează...' : 'Salvează mașina'}</button></div></div></Modal>;
+  return <Modal title="Adaugă mașină" onClose={onClose}><div className="space-y-5 p-6"><div className="grid gap-4 sm:grid-cols-2">{existingCar ? <div className="sm:col-span-2 rounded-lg border p-4" style={{ borderColor: 'var(--border)', background: 'var(--surface-secondary)' }}><p className="text-sm font-bold text-[var(--text-primary)]">{existingCar.license_plate} — {[existingCar.make, existingCar.model].filter(Boolean).join(' ') || 'Mașină existentă'}</p><p className="mt-1 text-xs text-[var(--text-secondary)]">Client: {existingCar.client_name}{existingCar.client_phone ? ` · ${existingCar.client_phone}` : ''}</p><p className="text-xs text-[var(--text-secondary)]">VIN: {existingCar.vin ?? '—'} · An: {existingCar.year ?? '—'}</p><p className="mt-1 text-xs font-bold" style={{ color: 'var(--primary)' }}>Ultimul kilometraj cunoscut: {formatMileage(existingCar.mileage)}</p><button type="button" onClick={clearExistingCar} className="mt-2 text-xs font-bold text-[var(--danger)]">Nu e mașina corectă? Caută din nou</button></div> : <div className="relative"><Field label="Număr înmatriculare" value={form.license_plate} onChange={onPlateChange} placeholder="TM 27 FXC" />{plateMatches.length > 0 && <div className="absolute left-0 right-0 top-full z-40 mt-1 overflow-hidden rounded-lg border bg-[var(--surface)] shadow-lg" style={{ borderColor: 'var(--border)' }}>{plateMatches.map((c: Car) => <button type="button" key={c.id} onMouseDown={(e: React.MouseEvent) => e.preventDefault()} onClick={() => selectExistingCar(c)} className="block w-full border-b px-3 py-2 text-left text-sm transition last:border-0 hover:bg-[var(--surface-secondary)]" style={{ borderColor: 'var(--border)' }}><span className="font-bold" style={{ color: 'var(--text-primary)' }}>{c.license_plate}</span><span className="ml-2" style={{ color: 'var(--text-secondary)' }}>{[c.make, c.model].filter(Boolean).join(' ') || '—'}</span><span className="ml-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{c.vin ? `VIN ${c.vin} · ` : ''}{formatMileage(c.mileage)}</span></button>)}</div>}</div>}{!existingCar && <Field label="Nume client" value={form.client_name} onChange={(v: string) => update('client_name', v)} placeholder="Ion Popescu" />}{!existingCar && <Field label="Telefon" value={form.client_phone} onChange={(v: string) => update('client_phone', v)} placeholder="0740 000 000" />}<Field label="Termen" value={form.deadline} onChange={(v: string) => update('deadline', v)} type="date" />{!existingCar && <Field label="An fabricație (opțional)" value={form.year} onChange={(v: string) => update('year', v)} type="number" placeholder="2018" />}{!existingCar && <Field label="Marcă" value={form.make} onChange={(v: string) => update('make', v)} placeholder="Mercedes" list="servix-makes" />}{!existingCar && <Field label="Model" value={form.model} onChange={(v: string) => update('model', v)} placeholder="Clasa C" list="servix-models" />}{!existingCar && <Field label="Serie șasiu / VIN (opțional)" value={form.vin} onChange={(v: string) => update('vin', v)} placeholder="WVWZZZ..." />}<Field label={existingCar ? 'Kilometri actuali (obligatoriu)' : 'Kilometraj (obligatoriu)'} value={form.mileage} onChange={(v: string) => update('mileage', v)} type="number" placeholder={existingCar ? String(existingCar.mileage ?? '') : '150000'} /><label className="text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Nivel carburant (opțional)<select value={form.fuel_level} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => update('fuel_level', e.target.value)} className="mt-2 h-11 w-full rounded-lg border border-[var(--border)] px-3 text-sm font-semibold text-[var(--text-primary)]"><option value="">—</option>{fuelOptions.map((f: FuelLevel) => <option key={f} value={f}>{fuelLabels[f]}</option>)}</select></label><label className="text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Prioritate<select value={form.priority} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => update('priority', e.target.value)} className="mt-2 h-11 w-full rounded-lg border border-[var(--border)] px-3 text-sm font-semibold text-[var(--text-primary)]"><option value="normala">Normală</option><option value="urgenta">Urgentă</option></select></label><label className="text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Responsabil<select value={form.assigned_employee_id} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => update('assigned_employee_id', e.target.value)} className="mt-2 h-11 w-full rounded-lg border border-[var(--border)] px-3 text-sm font-semibold text-[var(--text-primary)]"><option value="">Nealocat</option>{employees.filter((e: Employee) => e.role === 'employee').map((e: Employee) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></label><Field label="URL poză mașină (opțional)" value={form.photo_url} onChange={(v: string) => update('photo_url', v)} placeholder="https://..." /><div><label className="text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Fotografie mașină</label><div className="mt-2 flex items-center gap-3">{form.photo_url ? <img src={form.photo_url} alt="Mașină" className="h-16 w-24 flex-none rounded-lg object-cover" /> : <div className="flex h-16 w-24 flex-none items-center justify-center rounded-lg" style={{ background: 'color-mix(in srgb, var(--primary) 12%, transparent)' }}><CarFront size={26} style={{ color: 'var(--secondary)' }} /></div>}<button onClick={() => carPhotoInputRef.current?.click()} disabled={photoUploading} className="flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-bold text-[var(--secondary)] transition hover:bg-[var(--card)] disabled:opacity-50"><Image size={14} /> {photoUploading ? 'Se încarcă...' : '+ Adaugă fotografie'}</button>{form.photo_url && <button onClick={() => update('photo_url', '')} className="text-xs font-bold text-[var(--danger)]">Elimină</button>}</div>{photoErr && <p className="mt-1 text-xs font-semibold text-red-500">{photoErr}</p>}<input ref={carPhotoInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e: React.ChangeEvent<HTMLInputElement>) => void handleCarPhoto(e)} /></div></div><label className="block text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Observații caroserie (opțional)<textarea value={form.body_observations} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => update('body_observations', e.target.value)} rows={2} className="mt-2 w-full rounded-lg border border-[var(--border)] px-3 py-2 text-sm outline-none focus:border-[var(--primary)]" placeholder="Zgârietură portieră stânga, etc." /></label><label className="flex items-center gap-2 text-sm font-semibold text-[var(--text-secondary)]"><input type="checkbox" checked={form.is_warranty} onChange={(e: React.ChangeEvent<HTMLInputElement>) => update('is_warranty', e.target.checked)} /> În garanție (tarif 0 lei/oră)</label><label className="block text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Note<textarea value={form.notes} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => update('notes', e.target.value)} rows={3} className="mt-2 w-full rounded-lg border border-[var(--border)] px-3 py-2 text-sm outline-none focus:border-[var(--primary)]" placeholder="Informații relevante..." /></label><div><div className="mb-2 flex items-center justify-between"><label className="text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">Lucrări necesare</label><button type="button" onClick={() => setForm({ ...form, jobs: [...form.jobs, ''] })} className="text-xs font-bold text-[var(--primary)]">+ Adaugă lucrare</button></div><div className="space-y-2">{form.jobs.map((j: string, i: number) => <div key={i} className="flex items-center gap-2"><div className="flex-1"><CatalogAutocomplete label={`Lucrarea ${i + 1}`} value={j} onChange={(v: string) => updateJobAt(i, v)} options={workCatalog} placeholder="ex: Schimbare bucșe" fuzzyFallback /></div>{form.jobs.length > 1 && <button type="button" onClick={() => removeJobAt(i)} className="mt-6 flex h-9 w-9 flex-none items-center justify-center rounded-lg text-[var(--danger)] transition hover:bg-[var(--surface-secondary)]" title="Șterge lucrarea"><X size={16} /></button>}</div>)}</div></div>{error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{error}</div>}<datalist id="servix-makes">{VEHICLE_MAKES.map((m: string) => <option key={m} value={m} />)}</datalist><datalist id="servix-models">{modelsFor(form.make).map((m: string) => <option key={m} value={m} />)}</datalist><div className="flex justify-end gap-3 border-t border-[var(--border)] pt-5"><button onClick={onClose} className="rounded-lg px-4 py-2.5 text-sm font-bold text-[var(--text-secondary)] hover:bg-[var(--border)]">Anulează</button><button onClick={save} disabled={saving || !form.license_plate || !form.client_name || !form.mileage.trim() || !form.jobs.some((j: string) => j.trim()) || (existingCar != null && Number(form.mileage) === existingCar.mileage)} className="rounded-lg px-5 py-2.5 text-sm font-bold text-white transition disabled:bg-[var(--border)] disabled:text-[var(--text-secondary)]" style={{ background: 'var(--button)' }}>{saving ? 'Se salvează...' : 'Salvează mașina'}</button></div></div></Modal>;
 }
 
 // ============================================================

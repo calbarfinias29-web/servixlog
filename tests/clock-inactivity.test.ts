@@ -49,13 +49,13 @@ test('formatClockDate: se actualizeaza (alta zi â†’ alta data)', () => {
   assert.notEqual(ziua1, ziua2);
 });
 
-// â€”â€”â€”â€”â€” 6..10 â€” INACTIVITY (exact 5 minute = 300 s) â€”â€”â€”â€”â€”
-test('INACTIVITY_TIMEOUT_MS â€” exact 300 de secunde (5 minute)', () => {
-  assert.equal(INACTIVITY_TIMEOUT_MS, 300_000);
-  assert.equal(INACTIVITY_TIMEOUT_MS / 1000, 300);
+// â€”â€”â€”â€”â€” 6..10 â€” INACTIVITY (exact 1 minut = 60 s) â€”â€”â€”â€”â€”
+test('INACTIVITY_TIMEOUT_MS â€” exact 60 de secunde (1 minut)', () => {
+  assert.equal(INACTIVITY_TIMEOUT_MS, 60_000);
+  assert.equal(INACTIVITY_TIMEOUT_MS / 1000, 60);
 });
 
-test('timeout: dupa exact 300 s fara activitate â†’ onTimeout (revine)', () => {
+test('timeout: dupa exact 60 s fara activitate â†’ onTimeout (revine)', () => {
   let fired =  0;
   let clock =  0;
   const watch = createInactivityWatch({
@@ -72,7 +72,7 @@ test('timeout: dupa exact 300 s fara activitate â†’ onTimeout (revine)', ()
   assert.equal(fired, 1);
 });
 
-test('activitate (touch/click/tastatura/mouse) reseteaza timer-ul de 5 min', () => {
+test('activitate (touch/click/tastatura/mouse) reseteaza timer-ul de 1 min', () => {
   let fired =  0;
   let clock = INACTIVITY_TIMEOUT_MS;
   const watch = createInactivityWatch({

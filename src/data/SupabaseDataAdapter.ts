@@ -12,6 +12,7 @@ import { supabase } from '@/lib/supabase';
 import type { DataAdapter, QueryResult, CarActivityEntry, EmployeeTimeEntry, CarUpdateInput } from './DataAdapter';
 import type { Appointment, Car, Employee, Job, Rates, Schedule, Theme } from '@/types';
 import type { CatalogOption } from '@/components/CatalogAutocomplete';
+import type { EmployeeInactivityNotification, InactivityObservationResult } from '@/lib/employeeInactivity';
 
 export class SupabaseDataAdapter implements DataAdapter {
   async getEmployees(): Promise<QueryResult<Employee[]>> {
@@ -93,7 +94,7 @@ export class SupabaseDataAdapter implements DataAdapter {
   async getCarActivityLog(carId: string): Promise<QueryResult<CarActivityEntry[]>> {
     const { data, error } = await supabase
       .from('activity_log')
-      .select('id, action, detail, created_at')
+      .select('id, action, detail, created_at, employee_id, job_id')
       .eq('car_id', carId)
       .order('created_at', { ascending: true });
     return { data: data as CarActivityEntry[] | null, error };
@@ -108,6 +109,34 @@ export class SupabaseDataAdapter implements DataAdapter {
     if (params.employeeId) query = query.eq('employee_id', params.employeeId);
     const { data, error } = await query;
     return { data: data as EmployeeTimeEntry[] | null, error };
+  }
+
+  async observeEmployeeInactivity(): Promise<QueryResult<InactivityObservationResult>> {
+    const { data: created, error: observeError } = await supabase.rpc('observe_employee_inactivity');
+    if (observeError) return { data: null, error: observeError };
+    const unread = await this.getEmployeeInactivityNotifications(true);
+    if (unread.error) return { data: null, error: unread.error };
+    return { data: { created: (created ?? []) as EmployeeInactivityNotification[], unread: unread.data ?? [] }, error: null };
+  }
+
+  async getEmployeeInactivityNotifications(unreadOnly = true): Promise<QueryResult<EmployeeInactivityNotification[]>> {
+    let query = supabase
+      .from('employee_inactivity_notifications')
+      .select('id, employee_id, period_id, threshold_minutes, created_at, read_at')
+      .order('created_at', { ascending: false });
+    if (unreadOnly) query = query.is('read_at', null);
+    const { data, error } = await query;
+    return { data: data as EmployeeInactivityNotification[] | null, error };
+  }
+
+  async markEmployeeInactivityNotificationRead(notificationId: string): Promise<QueryResult<EmployeeInactivityNotification>> {
+    const { data, error } = await supabase
+      .from('employee_inactivity_notifications')
+      .update({ read_at: new Date().toISOString() })
+      .eq('id', notificationId)
+      .select('id, employee_id, period_id, threshold_minutes, created_at, read_at')
+      .maybeSingle();
+    return { data: data as EmployeeInactivityNotification | null, error };
   }
 
   /**

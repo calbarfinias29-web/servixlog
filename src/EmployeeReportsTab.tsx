@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { dataAdapter, type EmployeeTimeEntry } from '@/data';
 import type { Employee } from '@/types';
+import { calculateCostSummary } from '@/lib/costs';
+import { generateReportPdf, heading as pdfHeading, row as pdfRow, title as pdfTitle, type PdfLine } from '@/lib/pdf';
 
 /**
  * TAB „Rapoarte angajați” — raport afișat în pagină (fără PDF).
@@ -26,6 +28,38 @@ function formatHours(seconds: number): string {
   return `${s}s`;
 }
 
+type EmployeeReportRow = { id: string; name: string; cars: number; jobs: number; normalSeconds: number; overtimeSeconds: number; seconds: number };
+
+function buildEmployeeReportLines(rows: EmployeeReportRow[], periodLabel: string, employeeLabel: string, normalRate: number, overtimeRate: number, vatRate: number): PdfLine[] {
+  const normalSeconds = rows.reduce((total, row) => total + row.normalSeconds, 0);
+  const overtimeSeconds = rows.reduce((total, row) => total + row.overtimeSeconds, 0);
+  const normalCost = normalSeconds / 3600 * normalRate;
+  const overtimeCost = overtimeSeconds / 3600 * overtimeRate;
+  const summary = calculateCostSummary(normalCost + overtimeCost, vatRate);
+  const lines: PdfLine[] = [
+    pdfTitle('SERVIX - Raport angajat'),
+    pdfRow('Angajat', employeeLabel),
+    pdfRow('Perioada', periodLabel),
+    pdfHeading('Activitate'),
+  ];
+  if (rows.length === 0) {
+    lines.push(pdfRow('-', 'Nu exista inregistrari pentru perioada selectata'));
+  } else {
+    rows.forEach((row) => {
+      lines.push(pdfRow(row.name, `${row.cars} masini / ${row.jobs} lucrari / ${formatHours(row.seconds)}`));
+    });
+  }
+  lines.push(
+    pdfHeading('Timp si cost'),
+    pdfRow('Ore normale', formatHours(normalSeconds)),
+    pdfRow('Ore suplimentare', formatHours(overtimeSeconds)),
+    pdfRow('SUBTOTAL FARA TVA', `${summary.subtotal.toFixed(2)} lei`),
+    pdfRow(`TVA (${vatRate}%)`, `${summary.vatAmount.toFixed(2)} lei`),
+    pdfRow('TOTAL CU TVA', `${summary.totalWithVat.toFixed(2)} lei`),
+  );
+  return lines;
+}
+
 export function EmployeeReportsTab({ employees }: { employees: Employee[] }) {
   const [employeeId, setEmployeeId] = useState('all');
   const [fromDate, setFromDate] = useState('');
@@ -38,7 +72,7 @@ export function EmployeeReportsTab({ employees }: { employees: Employee[] }) {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
-  const [rows, setRows] = useState<Array<{ id: string; name: string; cars: number; jobs: number; seconds: number }> | null>(null);
+  const [rows, setRows] = useState<EmployeeReportRow[] | null>(null);
   const [periodLabel, setPeriodLabel] = useState('');
 
   const applyFilters = async (): Promise<void> => {
@@ -83,30 +117,45 @@ export function EmployeeReportsTab({ employees }: { employees: Employee[] }) {
       const entries: EmployeeTimeEntry[] = timeRes.data ?? [];
       if (entries.length === 0) {
         setInfo('Nu există înregistrări de timp (time_entries) pentru perioada selectată. Atenție: lucrările pornite cu timerul acumulează timp doar în jobs.worked_seconds (per lucrare, nu per angajat) și apar aici doar dacă există intervale înregistrate în istoricul time_entries.');
-        return;
       }
 
-      const byEmployee = new Map<string, { cars: Set<string>; jobs: Set<string>; seconds: number }>();
+      const byEmployee = new Map<string, { cars: Set<string>; jobs: Set<string>; normalSeconds: number; overtimeSeconds: number }>();
       for (const e of entries) {
         const sec = e.duration_seconds ?? 0; // null = interval încă în derulare — nu-l inventăm
         if (sec <= 0) continue;
         let agg = byEmployee.get(e.employee_id);
-        if (!agg) { agg = { cars: new Set(), jobs: new Set(), seconds: 0 }; byEmployee.set(e.employee_id, agg); }
+        if (!agg) { agg = { cars: new Set(), jobs: new Set(), normalSeconds: 0, overtimeSeconds: 0 }; byEmployee.set(e.employee_id, agg); }
         agg.jobs.add(e.job_id); // lucrarea se numără o singură dată, indiferent câte intervale are
         const carId = e.jobs?.car_id;
         if (carId) agg.cars.add(carId);
-        agg.seconds += sec;
+        if (e.is_overtime) agg.overtimeSeconds += sec;
+        else agg.normalSeconds += sec;
       }
 
       const nameOf = (id: string): string => employees.find((emp: Employee) => emp.id === id)?.name ?? 'Angajat necunoscut';
       const result = Array.from(byEmployee.entries())
-        .map(([id, agg]) => ({ id, name: nameOf(id), cars: agg.cars.size, jobs: agg.jobs.size, seconds: agg.seconds }))
+        .map(([id, agg]) => ({ id, name: nameOf(id), cars: agg.cars.size, jobs: agg.jobs.size, normalSeconds: agg.normalSeconds, overtimeSeconds: agg.overtimeSeconds, seconds: agg.normalSeconds + agg.overtimeSeconds }))
         .sort((a, b) => b.seconds - a.seconds);
+      if (employeeId !== 'all' && !result.some((row) => row.id === employeeId)) {
+        result.push({ id: employeeId, name: nameOf(employeeId), cars: 0, jobs: 0, normalSeconds: 0, overtimeSeconds: 0, seconds: 0 });
+      }
       setRows(result);
       setPeriodLabel(`${new Date(`${fromDate}T00:00:00`).toLocaleDateString('ro-RO')} — ${new Date(`${effectiveTo}T00:00:00`).toLocaleDateString('ro-RO')}`);
     } finally {
       setLoading(false);
     }
+  };
+
+  const generatePdf = async (): Promise<void> => {
+    if (!rows) return;
+    const ratesResult = await dataAdapter.getRates();
+    if (ratesResult.error || !ratesResult.data) {
+      setError('Nu am putut încărca tarifele pentru raportul PDF.');
+      return;
+    }
+    const selectedName = employeeId === 'all' ? 'Toți angajații' : employees.find((employee) => employee.id === employeeId)?.name ?? 'Angajat necunoscut';
+    const lines = buildEmployeeReportLines(rows, periodLabel, selectedName, ratesResult.data.normal_rate, ratesResult.data.overtime_rate, ratesResult.data.vat_rate);
+    generateReportPdf(`servix_raport_angajat_${employeeId === 'all' ? 'toti' : employeeId}.pdf`, lines);
   };
 
   const totalCars = rows?.reduce((t, r) => t + r.cars, 0) ?? 0;
@@ -140,9 +189,14 @@ export function EmployeeReportsTab({ employees }: { employees: Employee[] }) {
             <input type="date" value={toDate} max={todayStr()} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setToDate(e.target.value)} className={inputCls} style={borderStyle} />
           </label>
           <div className="flex items-end">
-            <button onClick={() => void applyFilters()} disabled={loading} className="h-11 w-full rounded-lg px-4 text-sm font-bold text-white shadow-sm transition disabled:opacity-50" style={{ background: 'var(--button)' }}>
-              {loading ? 'Se încarcă...' : 'Aplică filtrele'}
-            </button>
+            <div className="flex gap-2">
+              <button onClick={() => void applyFilters()} disabled={loading} className="h-11 flex-1 rounded-lg px-4 text-sm font-bold text-white shadow-sm transition disabled:opacity-50" style={{ background: 'var(--button)' }}>
+                {loading ? 'Se încarcă...' : 'Aplică filtrele'}
+              </button>
+              <button onClick={() => void generatePdf()} disabled={!rows || loading} className="h-11 rounded-lg border px-4 text-sm font-bold transition disabled:opacity-50" style={{ borderColor: 'var(--border)', color: 'var(--text-primary)' }}>
+                PDF
+              </button>
+            </div>
           </div>
         </div>
         {error && <p className="mt-3 rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}>{error}</p>}

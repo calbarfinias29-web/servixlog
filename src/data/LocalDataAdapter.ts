@@ -39,6 +39,7 @@ import type { DataAdapter, QueryResult, CarActivityEntry, EmployeeTimeEntry,
   EmployeeWriteInput, EmployeeUpdateInput, AppointmentWriteInput, AppointmentUpdateInput,
   RatesUpdateInput, ScheduleUpdateInput, TimerOperationInput, TimerStatusInput, TimerPayload, CatalogOption,
   TimerTakeoverInput, TimerTransferInput, EventSubscriptionOptions, LocalEvent } from './DataAdapter.ts';
+import type { EmployeeInactivityNotification, InactivityObservationResult } from '../lib/employeeInactivity.ts';
 import type { DeviceListResult, DevicePairingResult, DeviceType, ManagedDevice } from './DataAdapter.ts';
 import type { Appointment, Car, Employee, Job, Rates, Schedule, Theme } from '../types.ts';
 
@@ -149,6 +150,20 @@ export class LocalDataAdapter implements DataAdapter {
     return this.field(`/api/time-entries?${qs.toString()}`, 'entries');
   }
 
+  async observeEmployeeInactivity(employeeIds: string[], observedAt = new Date().toISOString()): Promise<QueryResult<InactivityObservationResult>> {
+    const result = await this.send('POST', '/api/inactivity/observe', { employee_ids: employeeIds, observed_at: observedAt });
+    return { data: result.data as InactivityObservationResult | null, error: result.error };
+  }
+
+  async getEmployeeInactivityNotifications(unreadOnly = true): Promise<QueryResult<EmployeeInactivityNotification[]>> {
+    return this.field(`/api/inactivity-notifications?unreadOnly=${unreadOnly ? 'true' : 'false'}`, 'notifications');
+  }
+
+  async markEmployeeInactivityNotificationRead(notificationId: string): Promise<QueryResult<EmployeeInactivityNotification>> {
+    const result = await this.send('PATCH', `/api/inactivity/notifications/${encodeURIComponent(notificationId)}`, {});
+    return this.entity<EmployeeInactivityNotification>(result, 'notification');
+  }
+
   // ============================ FAZA 7A — WRITE LOCAL ============================
 
   /**
@@ -225,6 +240,14 @@ export class LocalDataAdapter implements DataAdapter {
 
   async updateJob(id: string, input: JobUpdateInput): Promise<QueryResult<Job>> {
     return this.entity<Job>(await this.send('PATCH', `/api/jobs/${encodeURIComponent(id)}`, input), 'job');
+  }
+
+  async upsertWorkCatalog(name: string): Promise<QueryResult<CatalogOption>> {
+    return this.entity<CatalogOption>(await this.send('POST', '/api/work-catalog', { name }), 'catalog');
+  }
+
+  async addMileageLog(input: { car_id: string; mileage: number }): Promise<QueryResult<{ id: string; car_id: string; mileage: number }>> {
+    return this.entity<{ id: string; car_id: string; mileage: number }>(await this.send('POST', '/api/mileage-log', input), 'entry');
   }
 
   async createEmployee(input: EmployeeWriteInput): Promise<QueryResult<Employee>> {

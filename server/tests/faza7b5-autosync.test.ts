@@ -106,6 +106,37 @@ test('1. Auto-sync at 13:00 reconciles active sessions', async () => {
   assert.equal(inv.violations.length, 0);
 });
 
+test('1b. Manual break end keeps both employees stopped until explicit resume', async () => {
+  const first = createJobAndEmployee('manual-1');
+  const second = createJobAndEmployee('manual-2');
+  for (const employeeId of [first.employeeId, second.employeeId]) {
+    dx.db.prepare(`
+      INSERT INTO employee_event_settings (employee_id, break_start_mode, break_end_mode, work_start_mode, work_end_mode)
+      VALUES (?, 'auto', 'manual', 'auto', 'auto')
+    `).run(employeeId);
+  }
+
+  for (const item of [first, second]) {
+    const started = dispatchTimer(dx.db, 'POST', '/api/timer/start', { job_id: item.jobId, employee_id: item.employeeId }, new Date('2026-09-04T06:00:00Z').getTime());
+    assert.equal(started.status, 201);
+  }
+
+  checkAutoSyncWindows(dx.db, new Date('2026-09-04T10:00:00Z').getTime());
+  checkAutoSyncWindows(dx.db, new Date('2026-09-04T11:00:00Z').getTime());
+
+  for (const item of [first, second]) {
+    const paused = dx.db.prepare('SELECT status, started_at FROM jobs WHERE id = ?').get(item.jobId) as { status: string; started_at: string | null };
+    assert.equal(paused.status, 'in_lucru');
+    assert.equal(paused.started_at, null);
+
+    const resumed = await post('/api/timer/start', { job_id: item.jobId, employee_id: item.employeeId });
+    assert.equal(resumed.status, 200);
+    const running = dx.db.prepare('SELECT status, started_at FROM jobs WHERE id = ?').get(item.jobId) as { status: string; started_at: string | null };
+    assert.equal(running.status, 'in_lucru');
+    assert.ok(running.started_at);
+  }
+});
+
 test('2. Auto-sync is idempotent per employee per day', async () => {
   const { employeeId } = createJobAndEmployee('2');
   

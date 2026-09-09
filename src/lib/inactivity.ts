@@ -5,7 +5,7 @@
  * Helper pur, partajat de Web și Local.
  */
 
-export const INACTIVITY_TIMEOUT_MS = 300_000;
+export const INACTIVITY_TIMEOUT_MS = 60_000;
 
 export const ACTIVITY_EVENTS: readonly string[] = [
   'pointerdown', 'pointermove', 'pointerup', 'pointercancel',

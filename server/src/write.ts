@@ -555,6 +555,48 @@ function updateSchedule(db: DatabaseSync, body: Body): WriteOutcome {
   return applyUpdate(db, 'work_schedule', 'schedule', active.id, sets);
 }
 
+// ---------------------------------------------------------------- work_catalog / mileage_log
+
+/** Normalizare identică cu src/lib/search.ts (case-insensitive, fără diacritice, fără spații). */
+function normalizeCatalogName(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/ş/g, 's').replace(/ţ/g, 't')
+    .replace(/ș/g, 's').replace(/ț/g, 't')
+    .replace(/\s/g, '');
+}
+
+/** Memorează o denumire de lucrare pentru autocomplete — dedupe pe normalized_name (fără migrare, tabelul există deja). */
+function createWorkCatalogEntry(db: DatabaseSync, body: Body): WriteOutcome {
+  const issues: ValidationIssue[] = [];
+  const name = reqString(body, 'name', issues);
+  if (issues.length > 0) return invalid(issues);
+  const normalized = normalizeCatalogName(name!);
+  return tx(db, () => {
+    const existing = db.prepare('SELECT id, name, normalized_name FROM work_catalog WHERE normalized_name = ? LIMIT 1').get(normalized) as { id: string; name: string; normalized_name: string } | undefined;
+    if (existing) return { status: 200, payload: { ok: true, catalog: existing } };
+    const id = randomUUID();
+    db.prepare('INSERT INTO work_catalog (id, name, normalized_name) VALUES (?, ?, ?)').run(id, name, normalized);
+    return { status: 201, payload: { ok: true, catalog: { id, name, normalized_name: normalized } } };
+  });
+}
+
+/** Adaugă o intrare de kilometraj (istoric) — folosit la crearea/reutilizarea mașinilor. */
+function createMileageLogEntry(db: DatabaseSync, body: Body): WriteOutcome {
+  const issues: ValidationIssue[] = [];
+  const carId = reqString(body, 'car_id', issues);
+  const mileage = optInt(body, 'mileage', issues, 0);
+  if (mileage === undefined) issues.push({ field: 'mileage', message: "câmpul 'mileage' este obligatoriu (întreg >= 0)" });
+  if (issues.length > 0) return invalid(issues);
+  return tx(db, () => {
+    if (!rowExists(db, 'cars', carId!)) return referenceNotFound('car_id', carId!);
+    const id = randomUUID();
+    db.prepare('INSERT INTO mileage_log (id, car_id, mileage, recorded_at, is_demo) VALUES (?, ?, ?, ?, 0)').run(id, carId!, mileage!, new Date().toISOString());
+    return { status: 201, payload: { ok: true, entry: getById(db, 'mileage_log', id) } };
+  });
+}
+
 // ---------------------------------------------------------------- dispatch
 
 const ID_ROUTE = /^\/api\/(cars|jobs|employees|appointments)\/([^/]+)$/;
@@ -587,6 +629,8 @@ export async function dispatchWrite(db: DatabaseSync, method: string, path: stri
       case '/api/jobs': return createJob(db, body);
       case '/api/employees': return createEmployee(db, body);
       case '/api/appointments': return createAppointment(db, body);
+      case '/api/work-catalog': return createWorkCatalogEntry(db, body);
+      case '/api/mileage-log': return createMileageLogEntry(db, body);
       default:
         return { status: 404, payload: { ok: false, error: 'not_found', path } };
     }
