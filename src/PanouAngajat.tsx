@@ -642,6 +642,10 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
               <div className="text-[13px] font-semibold capitalize leading-tight" style={{ color: 'var(--text-secondary)' }}>{formatClockDate(now)}</div>
             </div>
             <div className="flex items-center gap-2.5">
+              {employee.avatar_url
+                ? <img src={employee.avatar_url} alt={employee.name} className="h-9 w-9 rounded-full border-2 object-cover" style={{ borderColor: 'var(--primary)' }} />
+                : <span className="flex h-9 w-9 items-center justify-center rounded-full text-[14px] font-bold" style={{ background: 'var(--card)', border: `1.5px solid ${'var(--primary)'}`, color: 'var(--secondary)' }}>{employee.name[0]}</span>}
+              <span className="flex items-center gap-1.5 text-[16px] font-extrabold" style={{ color: 'var(--warning)' }}><span className="hidden max-w-[170px] truncate sm:inline" style={{ color: 'var(--warning)' }}>{employee.name}</span><span className="h-2 w-2 rounded-full" style={{ background: 'var(--success)' }} /></span>
               {onChange && (
                 <button
                   onClick={onChange}
@@ -653,10 +657,6 @@ export default function PanouAngajat({ employee, cars, schedule, onRefresh, onCh
                   SCHIMBĂ ANGAJATUL
                 </button>
               )}
-              {employee.avatar_url
-                ? <img src={employee.avatar_url} alt={employee.name} className="h-9 w-9 rounded-full border-2 object-cover" style={{ borderColor: 'var(--primary)' }} />
-                : <span className="flex h-9 w-9 items-center justify-center rounded-full text-[14px] font-bold" style={{ background: 'var(--card)', border: `1.5px solid ${'var(--primary)'}`, color: 'var(--secondary)' }}>{employee.name[0]}</span>}
-              <span className="flex items-center gap-1.5 text-[14px] font-bold" style={{ color: 'var(--text-primary)' }}>{employee.name}<span className="h-2 w-2 rounded-full" style={{ background: 'var(--success)' }} /></span>
             </div>
           </header>
 

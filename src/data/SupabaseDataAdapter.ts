@@ -9,7 +9,7 @@
  */
 import { supabase } from '@/lib/supabase';
 
-import type { DataAdapter, QueryResult, CarActivityEntry, EmployeeTimeEntry } from './DataAdapter';
+import type { DataAdapter, QueryResult, CarActivityEntry, EmployeeTimeEntry, CarUpdateInput } from './DataAdapter';
 import type { Appointment, Car, Employee, Job, Rates, Schedule, Theme } from '@/types';
 import type { CatalogOption } from '@/components/CatalogAutocomplete';
 
@@ -108,5 +108,20 @@ export class SupabaseDataAdapter implements DataAdapter {
     if (params.employeeId) query = query.eq('employee_id', params.employeeId);
     const { data, error } = await query;
     return { data: data as EmployeeTimeEntry[] | null, error };
+  }
+
+  /**
+   * FAZA 7A — WRITE prin aceeași abstracție ca Local/SQLite.
+   * UPDATE pe mașina existentă (aceeași id), NU inserare. NU atinge istoricul
+   * (jobs / time_entries / plate_history / mileage_log) — doar câmpurile mașinii.
+   */
+  async updateCar(id: string, input: CarUpdateInput): Promise<QueryResult<Car>> {
+    const { data, error } = await supabase
+      .from('cars')
+      .update(input)
+      .eq('id', id)
+      .select('*, jobs(*), plate_history(*), mileage_log(*), car_photos(*)')
+      .maybeSingle();
+    return { data: data as Car | null, error };
   }
 }
