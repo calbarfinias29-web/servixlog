@@ -111,6 +111,16 @@ export class SupabaseDataAdapter implements DataAdapter {
     return { data: data as EmployeeTimeEntry[] | null, error };
   }
 
+  async getActivityLogRange(params: { fromIso: string; toIso: string }): Promise<QueryResult<CarActivityEntry[]>> {
+    const { data, error } = await supabase
+      .from('activity_log')
+      .select('id, action, detail, created_at, employee_id, job_id, car_id')
+      .gte('created_at', params.fromIso)
+      .lte('created_at', params.toIso)
+      .order('created_at', { ascending: true });
+    return { data: data as CarActivityEntry[] | null, error };
+  }
+
   async observeEmployeeInactivity(): Promise<QueryResult<InactivityObservationResult>> {
     const { data: created, error: observeError } = await supabase.rpc('observe_employee_inactivity');
     if (observeError) return { data: null, error: observeError };

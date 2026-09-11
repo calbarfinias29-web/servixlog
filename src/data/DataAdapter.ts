@@ -42,6 +42,8 @@ export interface CarActivityEntry {
   employee_id?: string | null;
   /** Lucrarea la care se referă evenimentul (opțional — evenimente per mașină). */
   job_id?: string | null;
+  /** Mașina la care se referă evenimentul (prezent doar în interogările pe interval). */
+  car_id?: string | null;
 }
 
 /**
@@ -277,4 +279,13 @@ export interface DataAdapter extends DataAdapterWrites {
    * Filtrează pe start_time în [fromIso, toIso] (inclusiv); opțional pe employeeId.
    */
   getTimeEntries(params: { fromIso: string; toIso: string; employeeId?: string }): Promise<QueryResult<EmployeeTimeEntry[]>>;
+  /**
+   * Jurnalul de activitate (activity_log) pentru TOATE mașinile/lucrările,
+   * filtrat pe created_at în [fromIso, toIso]. Sursa REALĂ pentru reconstruirea
+   * sesiunilor PORNIRE/OPRIRE (vezi src/lib/sessionPairing.ts) — spre deosebire
+   * de time_entries, activity_log este scris de fluxul real de lucru (start/
+   * pauză/reluare/finalizare/overtime/preluare) atât pe Web cât și pe Local.
+   * Metodă opțională: absența ei păstrează comportamentul anterior (time_entries).
+   */
+  getActivityLogRange?(params: { fromIso: string; toIso: string }): Promise<QueryResult<CarActivityEntry[]>>;
 }

@@ -156,6 +156,18 @@ function activityLogForCar(db: DatabaseSync, carId: string): unknown[] {
 }
 
 /**
+ * activity_log pentru TOATE mașinile, filtrat pe fereastra [fromIso, toIso]
+ * (created_at), ordonat cronologic — sursă reală pentru reconstruirea
+ * sesiunilor PORNIRE/OPRIRE (src/lib/sessionPairing.ts), echivalentul
+ * getActivityLogRange din SupabaseDataAdapter.
+ */
+function activityLogRange(db: DatabaseSync, fromIso: string, toIso: string): unknown[] {
+  return db
+    .prepare('SELECT id, action, detail, created_at, employee_id, job_id, car_id FROM activity_log WHERE created_at >= ? AND created_at <= ? ORDER BY created_at ASC')
+    .all(fromIso, toIso) as unknown[];
+}
+
+/**
  * FAZA 5 — time_entries + jobs!inner(car_id), echivalentul query-ului din
  * SupabaseDataAdapter: start_time între [fromIso, toIso] + employeeId opțional.
  * is_overtime este mapat din 0/1 la boolean, forma așteptată de UI.
@@ -313,7 +325,7 @@ export function createApp(db: DatabaseSync, startedAt = new Date(), options: Loc
           name: 'SERVIX Local Server',
           endpoints: ['/api/health', '/api/version', '/api/cars', '/api/employees', '/api/jobs', '/api/rates', '/api/schedule',
             '/api/themes', '/api/appointments', '/api/vehicle-makes', '/api/vehicle-models', '/api/work-catalog',
-            '/api/activity-log?carId=', '/api/time-entries?fromIso=&toIso=&employeeId='],
+            '/api/activity-log?carId=', '/api/time-entries?fromIso=&toIso=&employeeId=', '/api/activity-log-range?fromIso=&toIso='],
         });
         return;
 
@@ -417,6 +429,18 @@ export function createApp(db: DatabaseSync, startedAt = new Date(), options: Loc
         }
         const employeeId = url.searchParams.get('employeeId');
         const entries = timeEntries(db, fromIso, toIso, employeeId);
+        sendJson(res, 200, { count: entries.length, entries });
+        return;
+      }
+
+      case '/api/activity-log-range': {
+        const fromIso = url.searchParams.get('fromIso') ?? '';
+        const toIso = url.searchParams.get('toIso') ?? '';
+        if (!fromIso || !toIso) {
+          sendJson(res, 400, { ok: false, error: 'Parametrii fromIso si toIso sunt obligatorii.' });
+          return;
+        }
+        const entries = activityLogRange(db, fromIso, toIso);
         sendJson(res, 200, { count: entries.length, entries });
         return;
       }

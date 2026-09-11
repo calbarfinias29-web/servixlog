@@ -11,6 +11,7 @@ import { supabase } from '@/lib/supabase';
 import { dataAdapter, registry, type CarActivityEntry, type EmployeeTimeEntry } from '@/data';
 import type { Car, CarStatus, Employee, EmployeeEventSettings, EventMode, Job, JobStatus, Priority, Rates, Schedule, ScheduleDay, Theme, ThemeColors, View, FinancialStatus, FuelLevel, PlateHistoryEntry, MileageLogEntry, Appointment, AppointmentStatus, CarPhoto } from '@/types';
 import { generateReportPdf, title as pdfTitle, heading as pdfHeading, row as pdfRow, type PdfLine } from '@/lib/pdf';
+import { deriveTimeSessionsFromActivityLog } from '@/lib/sessionPairing';
 import PanouAngajat, { fmt as fmtHMS, getScheduleDay, overlapSeconds } from '@/PanouAngajat';
 import { VehicleImage } from '@/components/VehicleImage';
 import { formatClockDate, formatClockTime } from '@/lib/clock';
@@ -1392,15 +1393,18 @@ function buildTimeHistoryPdfLines(entries: EmployeeTimeEntry[], empName: (id: st
 }
 
 // ============================================================
-// CRONOLOGIE LUCRARE — jurnalul real de activitate (activity_log)
+// CRONOLOGIE LUCRARE — sesiuni PORNIRE/OPRIRE din activity_log
 // ============================================================
 // Sursă: același jurnal „ACTIVITATE” din Car History/Detalii mașină
 // (activity_log prin DataAdapter: Web=Supabase, Local=SQLite/server).
 // Evenimentele sunt filtrate pe job_id, astfel fiecare lucrare primește
-// DOAR activitatea proprie — nimic reconstruit din worked_seconds, nimic
-// inventat: se afișează exact data/ora/descrierea din jurnal.
+// DOAR activitatea proprie. În loc de propoziții („X a pornit la ora Y”),
+// evenimentele reale sunt asociate cronologic în perechi PORNIRE→OPRIRE
+// (src/lib/sessionPairing.ts) și afișate tabelar: DATA | PORNIRE | OPRIRE.
+// Nimic nu este inventat: o sesiune fără eveniment de oprire rămâne cu
+// coloana OPRIRE goală (lucrare încă activă).
 
-/** Ora (HH:MM) evenimentului, pentru propoziția „Nume + acțiune + oră”. */
+/** Ora (HH:MM) evenimentului. */
 function formatEventClock(iso: string): string {
   const d = new Date(iso);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -1411,6 +1415,8 @@ function formatEventClock(iso: string): string {
  * ANTERIOARĂ a ACELEIAȘI lucrări (distinge pornire vs. reluare din pauză vs.
  * reluare din așteptare piese). `null` = acțiune fără frază standard (transfer,
  * takeover etc.) — se folosește `detail`-ul existent, neschimbat.
+ * Folosit DOAR pentru fluxul „Activitate” afișat pe ecran (Detalii mașină);
+ * PDF-ul „Cronologie lucrare” folosește tabelul PORNIRE/OPRIRE de mai jos.
  */
 function activityEventPhrase(action: string, prevActionSameJob: string | null): string | null {
   switch (action) {
@@ -1427,7 +1433,7 @@ function activityEventPhrase(action: string, prevActionSameJob: string | null): 
   }
 }
 
-/** Text unic „Nume + acțiune + oră” pentru un eveniment; identic în Admin și PDF. */
+/** Text unic „Nume + acțiune + oră” pentru un eveniment, folosit în fluxul „Activitate” de pe ecran. */
 function describeActivityEvent(e: { action: string; detail: string | null; created_at: string; employee_id?: string | null }, prevActionSameJob: string | null, empName: (id: string | null) => string): string {
   const clock = formatEventClock(e.created_at);
   const person = e.employee_id ? empName(e.employee_id) : '';
@@ -1437,26 +1443,38 @@ function describeActivityEvent(e: { action: string; detail: string | null; creat
   return person && !desc.includes(person) ? `${desc} — ${person} la ${clock}` : `${desc} la ${clock}`;
 }
 
-/** Rânduri PDF pentru secțiunea „Cronologie lucrare” — tabel profesional, header repetat pe pagini noi. */
+/** Text „ORA - Angajat” pentru o coloană PORNIRE/OPRIRE; gol dacă nu există eveniment pereche. */
+function sessionColumnText(iso: string | null, employeeId: string, empName: (id: string | null) => string): string {
+  if (!iso) return '';
+  return `${formatEventClock(iso)} - ${empName(employeeId)}`;
+}
+
+/** Rânduri PDF pentru secțiunea „Cronologie lucrare” — tabel DATA | PORNIRE | OPRIRE, header repetat pe pagini noi. */
 function buildJobActivityPdfLines(activity: CarActivityEntry[], empName: (id: string | null) => string, jobId?: string): PdfLine[] {
   const lines: PdfLine[] = [pdfHeading('Cronologie lucrare')];
-  const list = activity
-    .filter((e) => (jobId ? e.job_id === jobId : true))
-    .slice()
-    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-  if (list.length === 0) {
+  const list = activity.filter((e) => (jobId ? e.job_id === jobId : true));
+  const sessions = deriveTimeSessionsFromActivityLog(list);
+  if (sessions.length === 0) {
     lines.push({ text: 'Nu exista evenimente inregistrate (activity_log)', size: 10.5, bold: false, color: '#000000', table: 'crono' });
     return lines;
   }
   // Header tabel (repetat automat la spargerea paginii de către generator).
-  lines.push({ text: 'DATA', size: 9.5, bold: true, color: '#000000', gapBefore: 4, cols: [{ text: 'ACTIVITATE', x: ACTIVITY_COL_X }], table: 'crono', tableHead: true });
+  lines.push({
+    text: 'DATA', size: 9.5, bold: true, color: '#000000', gapBefore: 4,
+    cols: [{ text: 'PORNIRE', x: SESSION_START_COL_X }, { text: 'OPRIRE', x: SESSION_END_COL_X }],
+    table: 'crono', tableHead: true,
+  });
   lines.push({ text: '', size: 2, bold: false, rule: true, gapBefore: 3, table: 'crono', tableHead: true });
-  // Lista e deja filtrată pe O SINGURĂ lucrare (jobId) — un singur „fir” cronologic.
-  let prevAction: string | null = null;
-  for (const e of list) {
-    const text = describeActivityEvent(e, prevAction, empName);
-    lines.push({ text: formatSessionDate(e.created_at), size: 10.5, bold: false, gapBefore: 5, cols: [{ text, x: ACTIVITY_COL_X }], table: 'crono' });
-    prevAction = e.action;
+  for (const s of sessions) {
+    lines.push({
+      text: formatSessionDate(s.start_time),
+      size: 10.5, bold: false, gapBefore: 5,
+      cols: [
+        { text: sessionColumnText(s.start_time, s.employee_id, empName), x: SESSION_START_COL_X },
+        { text: sessionColumnText(s.end_time, s.employee_id, empName), x: SESSION_END_COL_X },
+      ],
+      table: 'crono',
+    });
   }
   lines.push({ text: '', size: 2, bold: false, rule: true, gapBefore: 6, table: 'crono' });
   return lines;
@@ -1541,9 +1559,10 @@ function buildCarReportLines(car: Car, rates: Rates | null, plateHistory: PlateH
 const SECOND_COL_X = 330;   // coloana „LUCRARE” (dreapta)
 const DURATION_COL_X = 312; // coloana „Durată” din tabelul MANOPERĂ
 // Lățime fixă pentru coloana „DATA / ORA”: „08.09.2026 14:01:49” la 10.5pt
-// DejaVu ≈ 110pt, deci 170 lasă un gap clar față de ACTIVITATE. Generatorul
+// DejaVu ≈ 110pt, deci 170 lasă un gap clar față de PORNIRE. Generatorul
 // pdf.ts mută oricum coloana mai la dreapta dacă data ar fi mai lată (anti-suprapunere).
-const ACTIVITY_COL_X = 170; // coloana „ACTIVITATE” din cronologie
+const SESSION_START_COL_X = 170; // coloana „PORNIRE” din cronologie
+const SESSION_END_COL_X = 350;   // coloana „OPRIRE” din cronologie
 // Text informativ = negru complet (fără gri „spălăcit”); doar subtotal (roșu) și total cu TVA (verde) rămân colorate.
 const GRAY = '#000000';
 

@@ -3,18 +3,28 @@ import { dataAdapter, type EmployeeTimeEntry } from '@/data';
 import type { Employee } from '@/types';
 import { calculateCostSummary } from '@/lib/costs';
 import { generateReportPdf, heading as pdfHeading, row as pdfRow, title as pdfTitle, type PdfLine } from '@/lib/pdf';
+import { deriveTimeSessionsFromActivityLog } from '@/lib/sessionPairing';
+import { aggregateEmployeeTimeEntries, type EmployeeReportRow } from '@/lib/employeeReportAggregation';
 
 /**
  * TAB „Rapoarte angajați” — raport afișat în pagină (fără PDF).
  *
- * Sursa de date EXISTENTĂ: tabelul `time_entries` (istoric atomic per angajat):
- *   employee_id, job_id, start_time, end_time, duration_seconds, is_overtime.
+ * Surse de date:
+ *  1. `time_entries` (istoric atomic per angajat, dacă există): employee_id,
+ *     job_id, start_time, end_time, duration_seconds, is_overtime.
+ *  2. `activity_log` (sursa REALĂ a activității zilnice — pornire/pauză/
+ *     reluare/finalizare/overtime/preluare): reconstruim sesiunile PORNIRE→
+ *     OPRIRE cu src/lib/sessionPairing.ts. Este necesar deoarece fluxul real
+ *     de lucru (PanouAngajat / Local timer) NU scrie în `time_entries` —
+ *     acumulează timpul direct în jobs.worked_seconds/overtime_seconds, deci
+ *     `time_entries` conține DOAR date demo. Fără această a doua sursă,
+ *     raportul ar arăta mereu 0 pentru activitatea reală.
  *
  * - „Mașini lucrate” = numărul de mașini DISTINCTE (jobs.car_id) atinse de
  *   înregistrările de timp ale angajatului în perioada selectată.
  *   Aceeași lucrare / mașină cu mai multe înregistrări se numără O SINGURĂ DATĂ.
- * - „Ore lucrate” = suma duration_seconds din time_entries (timpul real,
- *   contabilizat deja de mecanismul existent, inclusiv overtime — is_overtime).
+ * - „Ore lucrate” = suma duration_seconds din intervalele reale (time_entries
+ *   + sesiuni reconstruite din activity_log), inclusiv overtime — is_overtime.
  * - Lucrările transferate: fiecare interval de timp are employee_id-ul propriu,
  *   deci timpul rămâne atribuit angajatului care l-a lucrat efectiv.
  */
@@ -27,8 +37,6 @@ function formatHours(seconds: number): string {
   if (m > 0) return s > 0 ? `${m}m ${s}s` : `${m}m`;
   return `${s}s`;
 }
-
-type EmployeeReportRow = { id: string; name: string; cars: number; jobs: number; normalSeconds: number; overtimeSeconds: number; seconds: number };
 
 function buildEmployeeReportLines(rows: EmployeeReportRow[], periodLabel: string, employeeLabel: string, normalRate: number, overtimeRate: number, vatRate: number): PdfLine[] {
   const normalSeconds = rows.reduce((total, row) => total + row.normalSeconds, 0);
@@ -114,31 +122,44 @@ export function EmployeeReportsTab({ employees }: { employees: Employee[] }) {
         return;
       }
 
-      const entries: EmployeeTimeEntry[] = timeRes.data ?? [];
-      if (entries.length === 0) {
-        setInfo('Nu există înregistrări de timp (time_entries) pentru perioada selectată. Atenție: lucrările pornite cu timerul acumulează timp doar în jobs.worked_seconds (per lucrare, nu per angajat) și apar aici doar dacă există intervale înregistrate în istoricul time_entries.');
+      const entries: EmployeeTimeEntry[] = [...(timeRes.data ?? [])];
+
+      // Sursa REALĂ: activity_log (pornire/pauză/reluare/finalizare/overtime/
+      // preluare), acoperind și activitatea care nu a scris în time_entries.
+      // Fereastra de citire se extinde până la „acum” pentru a prinde
+      // evenimentul de oprire chiar dacă survine după „Până la”; sesiunile
+      // sunt apoi filtrate după start_time în intervalul cerut de utilizator.
+      if (dataAdapter.getActivityLogRange) {
+        const nowIso = new Date().toISOString();
+        const activityRes = await dataAdapter.getActivityLogRange({ fromIso: startIso, toIso: nowIso > endIso ? nowIso : endIso });
+        if (!activityRes.error) {
+          const sessions = deriveTimeSessionsFromActivityLog(activityRes.data ?? []);
+          const seen = new Set(entries.map((e) => `${e.job_id}|${e.start_time}|${e.employee_id}`));
+          for (const s of sessions) {
+            if (s.start_time < startIso || s.start_time > endIso) continue;
+            if (employeeId !== 'all' && s.employee_id !== employeeId) continue;
+            const key = `${s.job_id}|${s.start_time}|${s.employee_id}`;
+            if (seen.has(key)) continue; // evită dublarea dacă aceeași sesiune există deja în time_entries
+            seen.add(key);
+            entries.push({
+              employee_id: s.employee_id,
+              job_id: s.job_id,
+              start_time: s.start_time,
+              end_time: s.end_time,
+              duration_seconds: s.duration_seconds,
+              is_overtime: s.is_overtime,
+              jobs: s.car_id ? { car_id: s.car_id } : null,
+            });
+          }
+        }
       }
 
-      const byEmployee = new Map<string, { cars: Set<string>; jobs: Set<string>; normalSeconds: number; overtimeSeconds: number }>();
-      for (const e of entries) {
-        const sec = e.duration_seconds ?? 0; // null = interval încă în derulare — nu-l inventăm
-        if (sec <= 0) continue;
-        let agg = byEmployee.get(e.employee_id);
-        if (!agg) { agg = { cars: new Set(), jobs: new Set(), normalSeconds: 0, overtimeSeconds: 0 }; byEmployee.set(e.employee_id, agg); }
-        agg.jobs.add(e.job_id); // lucrarea se numără o singură dată, indiferent câte intervale are
-        const carId = e.jobs?.car_id;
-        if (carId) agg.cars.add(carId);
-        if (e.is_overtime) agg.overtimeSeconds += sec;
-        else agg.normalSeconds += sec;
+      if (entries.length === 0) {
+        setInfo('Nu există înregistrări de timp pentru perioada selectată.');
       }
 
       const nameOf = (id: string): string => employees.find((emp: Employee) => emp.id === id)?.name ?? 'Angajat necunoscut';
-      const result = Array.from(byEmployee.entries())
-        .map(([id, agg]) => ({ id, name: nameOf(id), cars: agg.cars.size, jobs: agg.jobs.size, normalSeconds: agg.normalSeconds, overtimeSeconds: agg.overtimeSeconds, seconds: agg.normalSeconds + agg.overtimeSeconds }))
-        .sort((a, b) => b.seconds - a.seconds);
-      if (employeeId !== 'all' && !result.some((row) => row.id === employeeId)) {
-        result.push({ id: employeeId, name: nameOf(employeeId), cars: 0, jobs: 0, normalSeconds: 0, overtimeSeconds: 0, seconds: 0 });
-      }
+      const result = aggregateEmployeeTimeEntries(entries, nameOf, employeeId);
       setRows(result);
       setPeriodLabel(`${new Date(`${fromDate}T00:00:00`).toLocaleDateString('ro-RO')} — ${new Date(`${effectiveTo}T00:00:00`).toLocaleDateString('ro-RO')}`);
     } finally {
@@ -170,7 +191,7 @@ export function EmployeeReportsTab({ employees }: { employees: Employee[] }) {
       <div className="rounded-[16px] border bg-[var(--surface)] p-5 shadow-sm" style={{ borderColor: 'var(--border)' }}>
         <h3 className="text-[18px] font-bold" style={{ color: 'var(--text-primary)' }}>Raport angajați</h3>
         <p className="mt-1 text-sm" style={{ color: 'var(--text-secondary)' }}>
-          Activitate reală per angajat, pe baza istoricului detaliat de timp (time_entries). Perioada este inclusivă la ambele capete.
+          Activitate reală per angajat, pe baza sesiunilor de lucru reale (pornire/pauză/reluare/finalizare). Perioada este inclusivă la ambele capete.
         </p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <label className="block">

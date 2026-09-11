@@ -150,6 +150,11 @@ export class LocalDataAdapter implements DataAdapter {
     return this.field(`/api/time-entries?${qs.toString()}`, 'entries');
   }
 
+  async getActivityLogRange(params: { fromIso: string; toIso: string }): Promise<QueryResult<CarActivityEntry[]>> {
+    const qs = new URLSearchParams({ fromIso: params.fromIso, toIso: params.toIso });
+    return this.field(`/api/activity-log-range?${qs.toString()}`, 'entries');
+  }
+
   async observeEmployeeInactivity(employeeIds: string[], observedAt = new Date().toISOString()): Promise<QueryResult<InactivityObservationResult>> {
     const result = await this.send('POST', '/api/inactivity/observe', { employee_ids: employeeIds, observed_at: observedAt });
     return { data: result.data as InactivityObservationResult | null, error: result.error };

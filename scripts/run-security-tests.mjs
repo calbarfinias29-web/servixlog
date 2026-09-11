@@ -20,6 +20,8 @@ await build({
     path.join(root, 'tests', 'search-normalize.test.ts'),
     path.join(root, 'tests', 'faza3b-phase3.test.ts'),
     path.join(root, 'tests', 'faza4-full-test-mode.test.ts'),
+    path.join(root, 'tests', 'session-pairing.test.ts'),
+    path.join(root, 'tests', 'employee-reports-aggregation.test.ts'),
   ],
   outdir: outDir,
   bundle: true,
@@ -34,6 +36,6 @@ await build({
   external: ['@supabase/supabase-js'],
 });
 
-for (const f of ['faza2a-confirmation.test.js', 'faza2b-write-flow.test.js', 'faza2b-etapa2-cars.test.js', 'faza2-final.test.js', 'search-normalize.test.js', 'faza3b-phase3.test.js', 'faza4-full-test-mode.test.js']) {
+for (const f of ['faza2a-confirmation.test.js', 'faza2b-write-flow.test.js', 'faza2b-etapa2-cars.test.js', 'faza2-final.test.js', 'search-normalize.test.js', 'faza3b-phase3.test.js', 'faza4-full-test-mode.test.js', 'session-pairing.test.js', 'employee-reports-aggregation.test.js']) {
   execFileSync(process.execPath, [path.join(outDir, f)], { stdio: 'inherit' });
 }
