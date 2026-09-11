@@ -243,6 +243,12 @@ export interface DataAdapterWrites {
   createDevicePairing?(input: { deviceType: DeviceType; deviceName: string }): Promise<QueryResult<DevicePairingResult>>;
   revokeDevice?(deviceId: string): Promise<QueryResult<{ device: ManagedDevice }>>;
   reactivateDevice?(deviceId: string): Promise<QueryResult<DevicePairingResult>>;
+  /**
+   * Angajat Local Client — credențialele dispozitivului pared (headers
+   * `x-servix-device-*` pe apelurile de date prin LAN). Opțional: doar
+   * LocalDataAdapter o implementează; Web/Supabase rămân neschimbate.
+   */
+  setDeviceCredentials?(deviceId: string | null, credential: string | null): void;
   subscribeToEvents?(onEvent: (event: LocalEvent) => void, options?: EventSubscriptionOptions): () => void;
 }
 

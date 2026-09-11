@@ -53,9 +53,28 @@ function localError(message: string, code = 'LOCAL_HTTP'): PostgrestError {
 
 export class LocalDataAdapter implements DataAdapter {
   private readonly baseUrl: string;
+  private deviceId: string | null = null;
+  private deviceCredential: string | null = null;
 
   constructor(baseUrl: string = DEFAULT_LOCAL_SERVER_URL) {
     this.baseUrl = baseUrl;
+  }
+
+  /**
+   * Credentialul dispozitivului pared (Angajat Local Client). Când este setat,
+   * TOATE apelurile de date poartă headers `x-servix-device-*` (FAZA 8C —
+   * necesare pentru clienți non-loopback prin LAN). Default null → identic cu
+   * înainte (Admin localhost și Web rămân neschimbate).
+   */
+  setDeviceCredentials(deviceId: string | null, credential: string | null): void {
+    this.deviceId = deviceId && credential ? deviceId : null;
+    this.deviceCredential = deviceId && credential ? credential : null;
+  }
+
+  private authHeaders(): Record<string, string> {
+    return this.deviceId && this.deviceCredential
+      ? { 'x-servix-device-id': this.deviceId, 'x-servix-device-credential': this.deviceCredential }
+      : {};
   }
 
   /** GET generic + mapare erori (rețea / HTTP / JSON) în QueryResult. */
@@ -63,7 +82,7 @@ export class LocalDataAdapter implements DataAdapter {
     const url = `${this.baseUrl.replace(/\/+$/, '')}${path}`;
     let res: Response;
     try {
-      res = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
+      res = await fetch(url, { method: 'GET', headers: { Accept: 'application/json', ...this.authHeaders() } });
     } catch (err) {
       return {
         data: null,
@@ -186,7 +205,7 @@ export class LocalDataAdapter implements DataAdapter {
     try {
       res = await fetch(url, {
         method,
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...this.authHeaders() },
         body: JSON.stringify(body ?? {}),
       });
     } catch (err) {
