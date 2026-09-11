@@ -722,6 +722,16 @@ describe('J. Configuration', () => {
 
 // ===== K. AUTO-SYNC / RECOVERY =====
 
+// FAZA 8H fix (issue M.1) — timestamp fix, determinist pentru K2.
+// reconcileAutoEvents() vizitează doar frontierele de program (pauză/work_end)
+// dintre ziua civilă de start a sesiunii și ziua lui nowMs, și sărite orice
+// frontieră mai târziu decât nowMs. Un timestamp fix pe o zi ANTERIOară oricărei
+// rulări reale (2026-09-04, 09:00Z = 12:00 București, înainte de pauza 13:00)
+// nu reconciliază niciodată o sesiune proaspăt pornită, indiferent de ceasul
+// real al rulării (Date.now() eșua după 18:00 București). Doar testul — logica
+// de producție (server/src/timer.ts) rămâne neatinsă.
+const FIXED_PRIOR_DAY_NOW_MS = new Date('2026-09-04T09:00:00Z').getTime();
+
 describe('K. Auto-Sync / Recovery', () => {
   test('K1. checkAutoSyncWindows does not crash with no active sessions', () => {
     checkAutoSyncWindows(dx.db, Date.now());
@@ -733,7 +743,7 @@ describe('K. Auto-Sync / Recovery', () => {
 
     await post('/api/timer/start', { job_id: jobId, employee_id: emp.id });
 
-    checkAutoSyncWindows(dx.db, Date.now());
+    checkAutoSyncWindows(dx.db, FIXED_PRIOR_DAY_NOW_MS);
 
     const state = await get(`/api/timer/${jobId}`);
     assert.equal(state.json.session.state, 'running');

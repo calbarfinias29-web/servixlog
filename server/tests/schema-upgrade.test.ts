@@ -12,13 +12,13 @@ function tempDbPath(prefix: string): string {
   return join(mkdtempSync(join(tmpdir(), prefix)), 'local.db');
 }
 
-test('schema v5 creează fundația timerului, weekly schedule și device registry', () => {
-  const app = createDatabase(tempDbPath('servix-schema-v5-'), { seed: false });
+test('schema v6 creează fundația timerului, weekly schedule, device registry și inactivitatea angajaților', () => {
+  const app = createDatabase(tempDbPath('servix-schema-v6-'), { seed: false });
   try {
     assert.equal(app.schemaVersion, SCHEMA_VERSION);
-    assert.equal(SCHEMA_VERSION, 5);
+    assert.equal(SCHEMA_VERSION, 6);
     const tables = app.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>;
-    for (const name of ['timer_sessions', 'timer_intervals', 'plate_history', 'mileage_log', 'car_photos', 'employee_event_settings', 'session_event_log']) {
+    for (const name of ['timer_sessions', 'timer_intervals', 'plate_history', 'mileage_log', 'car_photos', 'employee_event_settings', 'session_event_log', 'employee_inactivity_periods', 'employee_inactivity_notifications']) {
       assert.ok(tables.some((table) => table.name === name), `missing table: ${name}`);
     }
     const devices = app.db.prepare('PRAGMA table_info(devices)').all() as Array<{ name: string }>;
@@ -35,7 +35,7 @@ test('schema v5 creează fundația timerului, weekly schedule și device registr
   }
 });
 
-test('upgrade v2 -> v5 păstrează datele existente', () => {
+test('upgrade v2 -> v6 păstrează datele existente', () => {
   const path = tempDbPath('servix-schema-upgrade-');
   const old = new DatabaseSync(path);
   old.exec(`
@@ -68,9 +68,10 @@ test('upgrade v2 -> v5 păstrează datele existente', () => {
     assert.equal(schedule.monday_start, '08:00');
     assert.equal(schedule.friday_end, '17:00');
     assert.equal(schedule.saturday_active, 0);
-    assert.equal((app.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 5);
+    assert.equal((app.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 6);
     const backupNames = readdirSync(join(dirname(path), 'backups'));
-    assert.ok(backupNames.some((name) => name.includes('pre-schema-v5')));
+    // db.ts numește backup-ul pre-upgrade `pre-schema-v${SCHEMA_VERSION}` (acum v6).
+    assert.ok(backupNames.some((name) => name.includes(`pre-schema-v${SCHEMA_VERSION}`)));
     app.db.prepare("INSERT INTO timer_sessions (id, job_id, employee_id, started_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run('session-1', 'job-old', 'emp-old', '2026-09-04T10:00:00.000Z', '2026-09-04T10:00:00.000Z', '2026-09-04T10:00:00.000Z');
     assert.throws(() => app.db.prepare("INSERT INTO timer_sessions (id, job_id, employee_id, started_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run('session-2', 'job-old', 'emp-old', '2026-09-04T10:01:00.000Z', '2026-09-04T10:01:00.000Z', '2026-09-04T10:01:00.000Z'));
   } finally {
