@@ -410,6 +410,8 @@ function reconcileAutoEvents(db: DatabaseSync, sessionId: string, nowMs: number)
 
     for (const boundary of boundaries) {
       if (nowMs < boundary.ms || !eventMode(db, employeeId, boundary.event)) continue;
+      const currentStartedAt = new Date(String(session.started_at)).getTime();
+      if (!Number.isFinite(currentStartedAt) || boundary.ms <= currentStartedAt) continue;
       if (eventLogged(db, employeeId, jobId, dayStr, boundary.event)) {
         alreadySynced += 1;
         continue;
@@ -428,12 +430,14 @@ function reconcileAutoEvents(db: DatabaseSync, sessionId: string, nowMs: number)
           .run(nowIso(boundary.ms), normal, now, sessionId);
         db.prepare("UPDATE jobs SET worked_seconds = ?, started_at = NULL, is_overtime = 0, updated_at = ? WHERE id = ?")
           .run(normal, now, jobId);
+        audit(db, job, employeeId, 'schedule_pause', 'Oprire automată - pauză programată', nowIso(boundary.ms));
       } else if (boundary.event === 'break_end' && String(session.state) === 'paused') {
         db.prepare("UPDATE timer_sessions SET state = 'running', paused_at = NULL, updated_at = ? WHERE id = ?").run(now, sessionId);
         db.prepare('INSERT INTO timer_intervals (id, session_id, employee_id, started_at, kind) VALUES (?, ?, ?, ?, ?)')
           .run(randomUUID(), sessionId, employeeId, nowIso(boundary.ms), 'normal');
         db.prepare("UPDATE jobs SET status = 'in_lucru', started_at = ?, is_overtime = 0, updated_at = ? WHERE id = ?")
           .run(nowIso(boundary.ms), now, jobId);
+        audit(db, job, employeeId, 'in_lucru', 'Reluare automată după pauza programată', nowIso(boundary.ms));
       } else if (boundary.event === 'work_end' && String(session.state) === 'running') {
         const interval = activeInterval(db, sessionId);
         if (!interval || String(interval.kind) !== 'normal') continue;
@@ -443,11 +447,11 @@ function reconcileAutoEvents(db: DatabaseSync, sessionId: string, nowMs: number)
           .run(nowIso(boundary.ms), nowIso(boundary.ms), normal, now, sessionId);
         db.prepare("UPDATE jobs SET status = 'asteptare', worked_seconds = ?, started_at = NULL, is_overtime = 0, updated_at = ? WHERE id = ?")
           .run(normal, now, jobId);
+        audit(db, job, employeeId, 'schedule_end', 'Oprire automată - sfârșit program', nowIso(boundary.ms));
       } else {
         continue;
       }
       logAutoEvent(db, employeeId, jobId, dayStr, boundary.event, now);
-      audit(db, job, employeeId, 'auto_sync', `Session reconciled at ${boundary.event}`, now);
       reconciled += 1;
     }
   }

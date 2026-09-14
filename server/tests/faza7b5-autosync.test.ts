@@ -472,6 +472,11 @@ test('21. Auto-sync pauses a running session at 13:00 Europe/Bucharest', () => {
   assert.equal(session.normal_seconds, 14_400);
   assert.equal(job.started_at, null);
   assert.equal(job.worked_seconds, 14_400);
+  const activity = dx.db.prepare('SELECT action, detail, job_id, created_at FROM activity_log WHERE job_id = ? ORDER BY created_at').all(jobId) as Array<{ action: string; detail: string; job_id: string; created_at: string }>;
+  assert.deepEqual(activity.map((event) => [event.action, event.detail, event.job_id, event.created_at]), [
+    ['in_lucru', 'Cronometrul a fost pornit', jobId, new Date(startAt).toISOString()],
+    ['schedule_pause', 'Oprire automată - pauză programată', jobId, new Date(new Date('2026-09-04T10:00:00Z').getTime()).toISOString()],
+  ]);
 });
 
 test('22. Auto-sync stops a normal session at 18:00 Europe/Bucharest', () => {
@@ -491,6 +496,11 @@ test('22. Auto-sync stops a normal session at 18:00 Europe/Bucharest', () => {
   assert.equal(job.started_at, null);
   assert.equal(job.worked_seconds, 28_800);
   assert.equal(job.overtime_seconds, 0);
+  const activity = dx.db.prepare('SELECT action, detail, created_at FROM activity_log WHERE job_id = ? ORDER BY created_at').all(jobId) as Array<{ action: string; detail: string; created_at: string }>;
+  const scheduleEnd = activity.find((event) => event.action === 'schedule_end');
+  assert.ok(scheduleEnd);
+  assert.equal(scheduleEnd.detail, 'Oprire automată - sfârșit program');
+  assert.equal(scheduleEnd.created_at, new Date(workEndAt).toISOString());
 });
 
 test('23. Recovery after the break window replays missed break events once', () => {
@@ -530,4 +540,56 @@ test('25. DST fallback uses Europe/Bucharest civil schedule boundaries', () => {
   const session = dx.db.prepare('SELECT state, normal_seconds FROM timer_sessions WHERE job_id = ?').get(jobId) as { state: string; normal_seconds: number };
   assert.equal(session.state, 'running');
   assert.equal(session.normal_seconds, 1_800);
+});
+
+test('26. Automatic break resume is a real activity event at 14:00', () => {
+  const { jobId, employeeId } = createJobAndEmployee('activity-auto-resume');
+  dispatchTimer(dx.db, 'POST', '/api/timer/start', { job_id: jobId, employee_id: employeeId }, new Date('2026-09-04T09:00:00Z').getTime());
+  checkAutoSyncWindows(dx.db, new Date('2026-09-04T11:00:00Z').getTime());
+
+  const activity = dx.db.prepare('SELECT action, detail, created_at FROM activity_log WHERE job_id = ? ORDER BY created_at').all(jobId) as Array<{ action: string; detail: string; created_at: string }>;
+  assert.deepEqual(activity.map((event) => [event.action, event.detail, event.created_at]), [
+    ['in_lucru', 'Cronometrul a fost pornit', new Date('2026-09-04T09:00:00Z').toISOString()],
+    ['schedule_pause', 'Oprire automată - pauză programată', new Date('2026-09-04T10:00:00Z').toISOString()],
+    ['in_lucru', 'Reluare automată după pauza programată', new Date('2026-09-04T11:00:00Z').toISOString()],
+  ]);
+});
+
+test('27. Repeated polling creates one automatic stop event only', () => {
+  const { jobId, employeeId } = createJobAndEmployee('activity-idempotent');
+  dispatchTimer(dx.db, 'POST', '/api/timer/start', { job_id: jobId, employee_id: employeeId }, new Date('2026-09-04T09:00:00Z').getTime());
+  const breakAt = new Date('2026-09-04T10:00:00Z').getTime();
+  checkAutoSyncWindows(dx.db, breakAt);
+  checkAutoSyncWindows(dx.db, breakAt);
+  checkAutoSyncWindows(dx.db, breakAt + 60_000);
+
+  const count = (dx.db.prepare("SELECT COUNT(*) AS count FROM activity_log WHERE job_id = ? AND action = 'schedule_pause'").get(jobId) as { count: number }).count;
+  assert.equal(count, 1);
+});
+
+test('28. Manual resume is recorded at the real 14:08 time, not 14:00', () => {
+  const { jobId, employeeId } = createJobAndEmployee('activity-manual-resume');
+  dx.db.prepare("INSERT INTO employee_event_settings (employee_id, break_end_mode) VALUES (?, 'manual')").run(employeeId);
+  dispatchTimer(dx.db, 'POST', '/api/timer/start', { job_id: jobId, employee_id: employeeId }, new Date('2026-09-04T09:00:00Z').getTime());
+  checkAutoSyncWindows(dx.db, new Date('2026-09-04T10:00:00Z').getTime());
+  dispatchTimer(dx.db, 'POST', '/api/timer/start', { job_id: jobId, employee_id: employeeId }, new Date('2026-09-04T12:08:00Z').getTime());
+
+  const activity = dx.db.prepare('SELECT action, detail, created_at FROM activity_log WHERE job_id = ? ORDER BY created_at').all(jobId) as Array<{ action: string; detail: string; created_at: string }>;
+  assert.equal(activity.some((event) => event.created_at === new Date('2026-09-04T11:00:00Z').toISOString()), false);
+  assert.equal(activity.at(-1)?.action, 'in_lucru');
+  assert.equal(activity.at(-1)?.created_at, new Date('2026-09-04T12:08:00Z').toISOString());
+});
+
+test('29. Next-day manual start does not reuse the previous day stop', () => {
+  const { jobId, employeeId } = createJobAndEmployee('activity-next-day');
+  dispatchTimer(dx.db, 'POST', '/api/timer/start', { job_id: jobId, employee_id: employeeId }, new Date('2026-09-04T14:41:00Z').getTime());
+  checkAutoSyncWindows(dx.db, new Date('2026-09-04T15:00:00Z').getTime());
+  dispatchTimer(dx.db, 'POST', '/api/timer/start', { job_id: jobId, employee_id: employeeId }, new Date('2026-09-05T05:10:00Z').getTime());
+
+  const activity = dx.db.prepare('SELECT action, created_at FROM activity_log WHERE job_id = ? ORDER BY created_at').all(jobId) as Array<{ action: string; created_at: string }>;
+  assert.deepEqual(activity.map((event) => [event.action, event.created_at]), [
+    ['in_lucru', new Date('2026-09-04T14:41:00Z').toISOString()],
+    ['schedule_end', new Date('2026-09-04T15:00:00Z').toISOString()],
+    ['in_lucru', new Date('2026-09-05T05:10:00Z').toISOString()],
+  ]);
 });

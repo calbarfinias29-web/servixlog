@@ -1,0 +1,260 @@
+-- Fix the race between automatic work-end reconciliation and overtime start.
+-- The helper is intentionally private: callers must hold the employee advisory lock.
+CREATE OR REPLACE FUNCTION servix_reconcile_work_end_for_job(
+  p_job_id uuid,
+  p_employee_id uuid,
+  p_now timestamptz DEFAULT now()
+)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_job jobs%ROWTYPE;
+  v_sched RECORD;
+  v_modes RECORD;
+  v_active boolean;
+  v_start time;
+  v_end time;
+  v_today date;
+  v_local time;
+  v_boundary timestamptz;
+BEGIN
+  SELECT * INTO v_job
+  FROM jobs
+  WHERE id = p_job_id
+  FOR UPDATE;
+  IF NOT FOUND THEN RETURN false; END IF;
+
+  SELECT * INTO v_sched FROM work_schedule WHERE active = true ORDER BY id LIMIT 1;
+  IF NOT FOUND THEN RETURN false; END IF;
+  SELECT day_active, day_start, day_end
+  INTO v_active, v_start, v_end
+  FROM servix_schedule_day_values((p_now AT TIME ZONE 'Europe/Bucharest')::date);
+  IF NOT COALESCE(v_active, false) THEN RETURN false; END IF;
+
+  SELECT * INTO v_modes FROM employee_event_settings WHERE employee_id = p_employee_id;
+  IF COALESCE(v_modes.work_end_mode, 'auto') <> 'auto' THEN RETURN false; END IF;
+
+  v_today := (p_now AT TIME ZONE 'Europe/Bucharest')::date;
+  v_local := (p_now AT TIME ZONE 'Europe/Bucharest')::time;
+  v_boundary := (v_today + v_end) AT TIME ZONE 'Europe/Bucharest';
+  IF v_local < v_end THEN RETURN false; END IF;
+
+  IF v_job.status <> 'in_lucru'
+     OR v_job.started_at IS NULL
+     OR v_job.is_overtime
+     OR EXISTS (
+       SELECT 1
+       FROM session_event_log
+       WHERE employee_id = p_employee_id
+         AND job_id = p_job_id
+         AND event = 'work_end'
+         AND event_date = v_today
+     ) THEN
+    RETURN false;
+  END IF;
+
+  UPDATE jobs
+  SET worked_seconds = worked_seconds + servix_normal_overlap_seconds(v_job.started_at, v_boundary),
+      started_at = NULL,
+      status = 'asteptare',
+      is_overtime = false
+  WHERE id = p_job_id
+    AND status = 'in_lucru'
+    AND started_at IS NOT NULL
+    AND is_overtime = false;
+  IF NOT FOUND THEN RETURN false; END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM activity_log
+    WHERE job_id = p_job_id
+      AND action = 'schedule_end'
+      AND created_at = v_boundary
+  ) THEN
+    INSERT INTO activity_log (employee_id, car_id, job_id, action, detail, created_at)
+    VALUES (p_employee_id, v_job.car_id, p_job_id, 'schedule_end', 'Oprire automată - sfârșit program', v_boundary);
+  END IF;
+
+  INSERT INTO session_event_log (employee_id, job_id, event, event_date)
+  VALUES (p_employee_id, p_job_id, 'work_end', v_today)
+  ON CONFLICT (employee_id, event, event_date) DO NOTHING;
+
+  RETURN true;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION servix_reconcile_work_end_for_job(uuid, uuid, timestamptz) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION safe_start_overtime(p_job_id uuid, p_employee_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_job jobs%ROWTYPE;
+  v_local time;
+  v_today date;
+  v_schedule RECORD;
+  v_active boolean;
+  v_start time;
+  v_end time;
+  v_now timestamptz := now();
+  v_reconciled boolean := false;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtextextended('auto_sync_session:' || p_employee_id::text, 0));
+
+  SELECT * INTO v_job FROM jobs WHERE id = p_job_id FOR UPDATE;
+  IF NOT FOUND THEN RETURN jsonb_build_object('ok', false, 'reason', 'Lucrarea nu există.'); END IF;
+  IF NOT EXISTS (SELECT 1 FROM cars c WHERE c.id = v_job.car_id AND c.assigned_employee_id = p_employee_id) THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'Lucrarea nu îți este alocată.');
+  END IF;
+  IF v_job.status != 'in_lucru' THEN RETURN jsonb_build_object('ok', false, 'reason', 'Lucrarea nu este pornită.'); END IF;
+
+  SELECT * INTO v_schedule FROM work_schedule WHERE active = true ORDER BY id LIMIT 1;
+  IF FOUND THEN
+    v_today := (v_now AT TIME ZONE 'Europe/Bucharest')::date;
+    SELECT day_active, day_start, day_end INTO v_active, v_start, v_end FROM servix_schedule_day_values(v_today);
+    v_local := (v_now AT TIME ZONE 'Europe/Bucharest')::time;
+    IF COALESCE(v_active, false) AND NOT (
+      (v_local >= v_schedule.break_start AND v_local < v_schedule.break_end)
+      OR v_local >= v_end
+      OR v_local < v_start
+    ) THEN
+      RETURN jsonb_build_object('ok', false, 'reason', 'Orele peste program pot fi pornite doar în pauză sau după program.');
+    END IF;
+  END IF;
+
+  IF v_job.is_overtime AND v_job.started_at IS NOT NULL THEN
+    RETURN jsonb_build_object('ok', true, 'no_op', true);
+  END IF;
+
+  v_reconciled := servix_reconcile_work_end_for_job(p_job_id, p_employee_id, v_now);
+  SELECT * INTO v_job FROM jobs WHERE id = p_job_id FOR UPDATE;
+
+  IF v_job.started_at IS NOT NULL AND NOT v_reconciled THEN
+    UPDATE jobs
+    SET worked_seconds = worked_seconds + servix_normal_overlap_seconds(v_job.started_at, v_now)
+    WHERE id = p_job_id;
+  END IF;
+
+  UPDATE jobs
+  SET started_at = v_now,
+      status = 'in_lucru',
+      is_overtime = true
+  WHERE id = p_job_id;
+
+  INSERT INTO activity_log (employee_id, car_id, job_id, action, detail, created_at)
+  VALUES (p_employee_id, v_job.car_id, p_job_id, 'overtime_start', 'Ore peste program pornite', v_now);
+
+  RETURN jsonb_build_object('ok', true);
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION safe_start_overtime(uuid, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION safe_start_overtime(uuid, uuid) TO anon, authenticated;
+
+CREATE OR REPLACE FUNCTION auto_sync_session(p_employee_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_sched RECORD;
+  v_modes RECORD;
+  v_local time;
+  v_today date;
+  v_active boolean;
+  v_start time;
+  v_end time;
+  v_job RECORD;
+  v_resume_id uuid;
+  v_changed boolean := false;
+  v_now timestamptz := now();
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtextextended('auto_sync_session:' || p_employee_id::text, 0));
+
+  SELECT * INTO v_sched FROM work_schedule WHERE active = true ORDER BY id LIMIT 1;
+  IF NOT FOUND THEN RETURN jsonb_build_object('ok', true, 'changed', false); END IF;
+  v_today := (v_now AT TIME ZONE 'Europe/Bucharest')::date;
+  SELECT day_active, day_start, day_end INTO v_active, v_start, v_end FROM servix_schedule_day_values(v_today);
+  IF NOT COALESCE(v_active, false) THEN RETURN jsonb_build_object('ok', true, 'changed', false); END IF;
+  v_sched.work_start := v_start;
+  v_sched.work_end := v_end;
+  SELECT * INTO v_modes FROM employee_event_settings WHERE employee_id = p_employee_id;
+  v_local := (v_now AT TIME ZONE 'Europe/Bucharest')::time;
+
+  IF COALESCE(v_modes.work_start_mode, 'auto') = 'auto' AND v_local >= v_sched.work_start AND v_local < v_sched.break_start THEN
+    IF NOT EXISTS (SELECT 1 FROM jobs j JOIN cars c ON c.id = j.car_id WHERE c.assigned_employee_id = p_employee_id AND j.status = 'in_lucru') THEN
+      SELECT e.job_id INTO v_resume_id FROM session_event_log e
+      WHERE e.employee_id = p_employee_id AND e.event = 'work_end' AND e.job_id IS NOT NULL AND e.event_date < v_today
+      ORDER BY e.event_date DESC, e.applied_at DESC LIMIT 1;
+      IF v_resume_id IS NOT NULL THEN
+        SELECT * INTO v_job FROM jobs WHERE id = v_resume_id FOR UPDATE;
+        IF FOUND AND v_job.status = 'asteptare' AND v_job.started_at IS NULL
+           AND EXISTS (SELECT 1 FROM cars c WHERE c.id = v_job.car_id AND c.assigned_employee_id = p_employee_id) THEN
+          UPDATE jobs SET status = 'in_lucru', started_at = (v_today + v_sched.work_start) AT TIME ZONE 'Europe/Bucharest'
+          WHERE id = v_job.id AND started_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM session_event_log WHERE employee_id = p_employee_id AND job_id = v_job.id AND event = 'work_start' AND event_date = v_today);
+          IF FOUND THEN
+            INSERT INTO activity_log (employee_id, car_id, job_id, action, detail, created_at)
+            VALUES (p_employee_id, v_job.car_id, v_job.id, 'in_lucru', 'Reluare automată la începutul programului', (v_today + v_sched.work_start) AT TIME ZONE 'Europe/Bucharest');
+            INSERT INTO session_event_log (employee_id, job_id, event, event_date) VALUES (p_employee_id, v_job.id, 'work_start', v_today) ON CONFLICT (employee_id, event, event_date) DO NOTHING;
+            v_changed := true;
+          END IF;
+        END IF;
+      END IF;
+    END IF;
+  END IF;
+
+  IF COALESCE(v_modes.break_start_mode, 'auto') = 'auto' AND v_local >= v_sched.break_start AND v_local < v_sched.break_end THEN
+    SELECT j.* INTO v_job FROM jobs j JOIN cars c ON c.id = j.car_id
+    WHERE c.assigned_employee_id = p_employee_id AND j.status = 'in_lucru' AND j.started_at IS NOT NULL AND j.is_overtime = false
+      AND NOT EXISTS (SELECT 1 FROM session_event_log WHERE employee_id = p_employee_id AND job_id = j.id AND event = 'break_start' AND event_date = v_today)
+    ORDER BY j.started_at DESC LIMIT 1 FOR UPDATE OF j;
+    IF FOUND THEN
+      UPDATE jobs SET worked_seconds = worked_seconds + servix_normal_overlap_seconds(v_job.started_at, (v_today + v_sched.break_start) AT TIME ZONE 'Europe/Bucharest'), started_at = NULL WHERE id = v_job.id AND started_at IS NOT NULL;
+      IF FOUND THEN
+        INSERT INTO activity_log (employee_id, car_id, job_id, action, detail, created_at) VALUES (p_employee_id, v_job.car_id, v_job.id, 'schedule_pause', 'Oprire automată - pauză programată', (v_today + v_sched.break_start) AT TIME ZONE 'Europe/Bucharest');
+        INSERT INTO session_event_log (employee_id, job_id, event, event_date) VALUES (p_employee_id, v_job.id, 'break_start', v_today) ON CONFLICT (employee_id, event, event_date) DO NOTHING;
+        v_changed := true;
+      END IF;
+    END IF;
+  END IF;
+
+  IF COALESCE(v_modes.break_end_mode, 'auto') = 'auto' AND v_local >= v_sched.break_end AND v_local < v_sched.work_end THEN
+    SELECT j.* INTO v_job FROM jobs j JOIN cars c ON c.id = j.car_id
+    WHERE c.assigned_employee_id = p_employee_id AND j.status = 'in_lucru' AND j.started_at IS NULL AND j.is_overtime = false
+      AND NOT EXISTS (SELECT 1 FROM session_event_log WHERE employee_id = p_employee_id AND job_id = j.id AND event = 'break_end' AND event_date = v_today)
+    ORDER BY j.started_at DESC NULLS LAST LIMIT 1 FOR UPDATE OF j;
+    IF FOUND THEN
+      UPDATE jobs SET started_at = (v_today + v_sched.break_end) AT TIME ZONE 'Europe/Bucharest' WHERE id = v_job.id AND started_at IS NULL;
+      IF FOUND THEN
+        INSERT INTO activity_log (employee_id, car_id, job_id, action, detail, created_at) VALUES (p_employee_id, v_job.car_id, v_job.id, 'in_lucru', 'Reluare automată după pauza programată', (v_today + v_sched.break_end) AT TIME ZONE 'Europe/Bucharest');
+        INSERT INTO session_event_log (employee_id, job_id, event, event_date) VALUES (p_employee_id, v_job.id, 'break_end', v_today) ON CONFLICT (employee_id, event, event_date) DO NOTHING;
+        v_changed := true;
+      END IF;
+    END IF;
+  END IF;
+
+  IF COALESCE(v_modes.work_end_mode, 'auto') = 'auto' AND v_local >= v_sched.work_end THEN
+    SELECT j.id INTO v_job
+    FROM jobs j JOIN cars c ON c.id = j.car_id
+    WHERE c.assigned_employee_id = p_employee_id AND j.status = 'in_lucru' AND j.started_at IS NOT NULL
+    ORDER BY j.started_at DESC LIMIT 1;
+    IF FOUND AND servix_reconcile_work_end_for_job(v_job.id, p_employee_id, v_now) THEN
+      v_changed := true;
+    END IF;
+  END IF;
+
+  RETURN jsonb_build_object('ok', true, 'changed', v_changed);
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION servix_reconcile_work_end_for_job(uuid, uuid, timestamptz) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION auto_sync_session(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION auto_sync_session(uuid) TO anon, authenticated;
