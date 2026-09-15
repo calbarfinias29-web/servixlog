@@ -1,42 +1,35 @@
 import { useState } from 'react';
-import { Download, Monitor, Wrench, ShieldCheck, Info } from 'lucide-react';
+import { Download, Monitor, Wrench, Info } from 'lucide-react';
 import { SERVIX_VERSION } from '@/version';
 
-/**
- * Placeholder configurabil pentru URL-ul installerului Windows.
- * Se poate completa ulterior:
- *  - prin variabila de mediu VITE_SERVIX_DOWNLOAD_URL (ex. în .env sau la build),
- *  - sau direct aici, în DOWNLOAD_URL_FALLBACK.
- */
-export const DOWNLOAD_URL_FALLBACK = '';
+export const DOWNLOAD_URLS = {
+  admin: (import.meta.env?.VITE_SERVIX_ADMIN_DOWNLOAD_URL as string | undefined)?.trim() || '',
+  angajat: (import.meta.env?.VITE_SERVIX_ANGAJAT_DOWNLOAD_URL as string | undefined)?.trim() || '',
+  companion: (import.meta.env?.VITE_SERVIX_COMPANION_DOWNLOAD_URL as string | undefined)?.trim() || '',
+} as const;
 
-function downloadUrl(): string {
-  const envUrl = import.meta.env?.VITE_SERVIX_DOWNLOAD_URL as string | undefined;
-  return (envUrl && envUrl.trim()) || DOWNLOAD_URL_FALLBACK;
+const products = [
+  { key: 'admin', name: 'SERVIX Admin', description: 'Pentru PC-ul principal al atelierului', url: DOWNLOAD_URLS.admin },
+  { key: 'angajat', name: 'SERVIX Angajat', description: 'Pentru tabletă/PC folosit de angajați', url: DOWNLOAD_URLS.angajat },
+  { key: 'companion', name: 'SERVIX Companion', description: 'Pentru PC secundar', url: DOWNLOAD_URLS.companion },
+] as const;
+
+function downloadProduct(url: string): void {
+  if (!url) return;
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = '';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
 }
 
 export default function DescarcarePage() {
-  const url = downloadUrl();
   const [downloadError, setDownloadError] = useState(false);
 
-  const handleDownload = () => {
-    if (!url) return;
-    setDownloadError(false);
-    try {
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = '';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    } catch {
-      setDownloadError(true);
-    }
-  };
-
   const steps: [string, string][] = [
-    ['Descarcă installerul.', 'Apasă butonul de mai sus și salvează fișierul de instalare pe PC.'],
-    ['Rulează installerul pe PC-ul principal al atelierului.', 'Deschide fișierul descărcat și urmează pașii instalației.'],
+    ['Alege installerul potrivit.', 'Admin se instalează pe PC-ul principal, Angajat pe tableta/PC-ul angajatului, iar Companion pe PC-ul secundar.'],
+    ['Descarcă și rulează installerul.', 'Salvează fișierul pe dispozitivul potrivit și urmează pașii instalației Windows.'],
     ['Deschide SERVIX și finalizează configurarea.', 'La prima pornire, completează datele atelierului și creează conturile angajaților.'],
   ];
 
@@ -72,41 +65,41 @@ export default function DescarcarePage() {
             </div>
           </div>
 
-          {url ? (
-            <button
-              onClick={handleDownload}
-              className="mt-6 flex h-[56px] w-full items-center justify-center gap-3 rounded-xl text-[16px] font-bold text-white transition hover:brightness-110 sm:text-[17px]"
-              style={{ background: 'var(--button)' }}
-            >
-              <Download size={22} />
-              Descarcă SERVIX pentru Windows
-            </button>
-          ) : (
-            <div className="mt-6">
-              <button
-                disabled
-                className="flex h-[56px] w-full cursor-not-allowed items-center justify-center gap-3 rounded-xl text-[16px] font-bold text-white opacity-60 sm:text-[17px]"
-                style={{ background: 'var(--button)' }}
-                title="Linkul de descărcare va fi disponibil în curând."
-              >
-                <Download size={22} />
-                Descarcă SERVIX pentru Windows
-              </button>
-              <p className="mt-3 text-center text-[13px]" style={{ color: 'var(--text-secondary)' }}>
-                Linkul de descărcare va fi activat în curând.
-              </p>
-            </div>
-          )}
+          <div className="mt-6 space-y-3">
+            {products.map((product) => (
+              <div key={product.key} className="rounded-xl border p-4" style={{ borderColor: 'var(--border)' }}>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-[16px] font-bold">{product.name}</h3>
+                    <p className="mt-1 text-[13px]" style={{ color: 'var(--text-secondary)' }}>{product.description}</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!product.url}
+                    onClick={() => {
+                      setDownloadError(false);
+                      try { downloadProduct(product.url); } catch { setDownloadError(true); }
+                    }}
+                    className="flex min-h-[46px] shrink-0 items-center justify-center gap-2 rounded-xl px-4 text-[14px] font-bold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 sm:min-w-[220px]"
+                    style={{ background: 'var(--button)' }}
+                    title={product.url ? undefined : 'URL-ul public nu este configurat încă.'}
+                  >
+                    <Download size={18} />
+                    Descarcă {product.name}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-4 text-center text-[13px]" style={{ color: 'var(--text-secondary)' }}>
+            Versiunea {SERVIX_VERSION} — release de test.
+          </p>
           {downloadError && (
             <p className="mt-3 text-center text-[13px]" style={{ color: 'var(--danger)' }}>
               Descărcarea a eșuat. Încearcă din nou.
             </p>
           )}
 
-          <div className="mt-5 flex items-center justify-center gap-2 text-[12px]" style={{ color: 'var(--text-muted)' }}>
-            <ShieldCheck size={14} style={{ color: 'var(--success)' }} />
-            Installer oficial SERVIX, semnat și verificat.
-          </div>
         </section>
 
         {/* Instalare */}
